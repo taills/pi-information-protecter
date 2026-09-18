@@ -1,0 +1,104 @@
+name: Publish to npm / 发布到 npm
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Validate without publishing / 仅验证，不发布'
+        type: boolean
+        default: true
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release / 验证发布
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source / 检出源码
+        # actions/checkout v6, pinned for supply-chain safety. / 固定版本提交以降低供应链风险。
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Set up Node.js / 配置 Node.js
+        # actions/setup-node v6; no cache in release builds. / 发布构建不使用缓存。
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Verify release ref and metadata / 验证发布引用及元数据
+        env:
+          DRY_RUN: >-
+            ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import assert from 'node:assert/strict';
+          const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+          assert.equal(pkg.name, 'pi-information-protecter');
+          assert.equal(pkg.repository.url,
+            'git+https://github.com/taills/pi-information-protecter.git');
+          assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
+          const expected = `refs/tags/v${pkg.version}`;
+          if (process.env.DRY_RUN !== 'true') {
+            assert.equal(process.env.GITHUB_REF, expected,
+              'Tag must match version / 标签必须匹配版本');
+          } else {
+            assert.ok([expected, 'refs/heads/main']
+              .includes(process.env.GITHUB_REF),
+              'Use main or the matching tag / 使用 main 或匹配标签');
+          }
+          NODE
+      - name: Install locked dependencies / 安装锁定依赖
+        run: npm ci
+      - name: Typecheck and test / 类型检查与测试
+        run: npm run check
+      - name: Inspect package contents / 检查发布包内容
+        run: npm pack --dry-run
+
+  publish:
+    name: Publish with OIDC / 使用 OIDC 发布
+    needs: validate
+    if: github.event_name == 'push' || !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout verified source / 检出已验证源码
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Set up Node.js / 配置 Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Install OIDC-capable npm / 安装支持 OIDC 的 npm
+        run: npm install --global npm@11.16.0
+      - name: Install locked dependencies / 安装锁定依赖
+        run: npm ci
+      # No NPM_TOKEN or NODE_AUTH_TOKEN secret is used. / 不使用长期 npm 令牌密钥。
+      - name: Publish public package with provenance / 发布公开包及来源证明
+        run: >-
+          npm publish --access public --provenance
+          --registry=https://registry.npmjs.org
+      - name: Verify registry version / 验证 registry 版本
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          npm view "pi-information-protecter@$VERSION" \
+            version dist.integrity dist.tarball --json \
+            --registry=https://registry.npmjs.org

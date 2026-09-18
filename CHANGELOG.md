@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+- Add tag-triggered GitHub Actions npm OIDC publishing, scoped environment permissions and manual dry-run validation.
+  增加标签触发的 GitHub Actions npm OIDC 发布、限定环境权限及手动试运行验证。
+- Document trusted publisher setup and the automated release procedure in both languages.
+  以双语记录可信发布配置和自动发布流程。
+
 ## 0.1.0 — Initial release / 首个版本
 
 **Sensitive Personal Information (SPI) Protecter — 个人敏感信息保护插件。**

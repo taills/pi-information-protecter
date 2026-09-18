@@ -13,7 +13,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**，验证基线为 0.85.1。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
-# Install the pinned npm release once published. / 发布后安装固定 npm 版本。
+# Install the published, pinned npm release. / 安装已发布的固定 npm 版本。
 pi install npm:pi-information-protecter@0.1.0
 
 # Alternatively, install from this repository without copying it. / 或从本仓库本地安装，不复制仓库。
@@ -30,6 +30,10 @@ Run `/reload` in an existing Pi session. Keep the complete `src/` directory when
 See [CHANGELOG.md](CHANGELOG.md) for version changes. Contribution and release instructions are in the repository's `CONTRIBUTING.md` and `docs/RELEASING.md`.
 
 版本变更见 [CHANGELOG.md](CHANGELOG.md)。贡献与发布流程见仓库内的 `CONTRIBUTING.md` 和 `docs/RELEASING.md`。
+
+Maintainers publish new versions by pushing matching `v*` tags. GitHub Actions validates and publishes through npm OIDC trusted publishing without a long-lived token. Manual dry runs do not publish.
+
+维护者通过推送匹配版本的 `v*` 标签发布新版本。GitHub Actions 验证后使用 npm OIDC 可信发布，不需要长期令牌；手动试运行不会发布。
 
 The first session creates `~/.pi/agent/protecter.json`, respecting `PI_CODING_AGENT_DIR`. Existing configuration is not overwritten; project-local configuration is not loaded. Unix permissions are tightened to `0600`. Symlinks, hard links, files exceeding 1 MiB and files owned by another user are rejected. Windows users must configure ACLs separately.
 

@@ -1,67 +1,87 @@
 # Release process / 发布流程
 
-## Conventions / 发布约定
+## Trusted publishing / 可信发布
 
-- Package: `pi-information-protecter`; public npm registry; initial version `0.1.0`.
-  包名如上，发布至 npm 公共仓库，首版为 `0.1.0`。
-- Git remote: `https://github.com/taills/pi-information-protecter`.
-  Git 远端为上述仓库。
-- Verify, commit and push source before publishing the matching npm version. Create and push a version tag after npm publication succeeds.
-  先验证、提交和推送源码，再发布对应 npm 版本；npm 成功后创建并推送版本标签。
-- Never overwrite a published version. Increment the version for subsequent fixes.
-  不覆盖已发布版本，后续修复需递增版本号。
-- Use standard npm authentication; never store credentials in source, command records or documentation.
-  使用 npm 标准认证，不把凭证写入源码、命令记录或文档。
-- All Markdown, code comments, commit messages and annotated tag messages must be English + Simplified Chinese.
-  所有 Markdown、代码注释、提交信息和附注标签信息必须使用英文＋简体中文。
+Releases use GitHub Actions OIDC, not a long-lived npm token. Workflow: [`.github/workflows/publish.yml`](../.github/workflows/publish.yml). npm `0.1.0` already exists; do not publish that version again.
 
-## Maintainer checklist / 维护者检查清单
+发布采用 GitHub Actions OIDC，不使用长期 npm 令牌。工作流见上述文件。npm 已存在 `0.1.0`，不要重复发布该版本。
 
-1. Check `git status`, the branch and remote; preserve other contributors' changes.
-   检查工作区、分支与远端，保留其他贡献者的修改。
-2. Update package version, README compatibility and CHANGELOG. For the first release, include repository, homepage, bugs and license metadata. Review bilingual completeness.
-   更新版本、兼容说明和日志，首版补齐仓库、主页、反馈和许可证元数据，并检查双语完整性。
-3. Run `npm ci` and `npm run check`. Use fictional secrets. Explicitly disclose if real-gateway end-to-end testing was not performed.
-   执行安装和检查，使用虚构敏感值；未执行真实网关端到端测试时须如实说明。
-4. Run `npm pack --dry-run --json`. Verify all source files, especially `scan-worker.mjs`, examples, README, SECURITY, CHANGELOG and LICENSE are included. Exclude real configuration, sessions, logs and node_modules.
-   预检打包清单，确认包含全部源码、worker、示例与必要文档，不包含真实配置、会话、日志和依赖目录。
-5. Run `git diff --check`, review staged files, commit with a bilingual message and push `main`.
-   检查差异，审查暂存文件，用双语提交信息提交并推送主分支。
-6. Run `npm whoami --registry=https://registry.npmjs.org` and confirm that the target version is not already published.
-   确认 npm 登录账号，并查询目标版本尚未发布。
-7. Publish with the following command. `prepublishOnly` repeats typechecking and tests. The maintainer must complete OTP/browser/permission requirements; do not bypass authentication.
-   使用以下命令发布，发布前钩子会再次运行类型检查和测试；OTP、浏览器验证或权限要求由维护者完成，不绕过认证。
+Configure the following trusted publisher at [npm package access settings](https://www.npmjs.com/package/pi-information-protecter/access). Saving requires the maintainer's npm security-key/2FA verification.
 
-   ```bash
-   npm publish --access public --registry=https://registry.npmjs.org
-   ```
+在上述 npm 包访问设置页配置以下可信发布者，保存需要维护者完成 npm 安全密钥／双因素认证。
 
-8. Confirm success, then query the exact version, dist-tag and tarball integrity.
-   确认成功后查询精确版本、分发标签及压缩包完整性。
+| Field / 字段 | Value / 值 |
+| --- | --- |
+| Publisher / 发布者 | GitHub Actions |
+| Organization or user / 组织或用户 | `taills` |
+| Repository / 仓库 | `pi-information-protecter` |
+| Workflow filename / 工作流文件名 | `publish.yml` |
+| Environment name / 环境名 | `npm` |
+| Allowed action / 允许操作 | Allow npm publish / 允许直接发布 |
 
-   ```bash
-   npm view pi-information-protecter@0.1.0 version dist.integrity dist.tarball --json --registry=https://registry.npmjs.org
-   npm view pi-information-protecter dist-tags --json --registry=https://registry.npmjs.org
-   ```
+Values are case-sensitive. The filename excludes `.github/workflows/`. Merely filling the form does not save trust: finish authentication and verify the connection is listed. No `NPM_TOKEN` or `NODE_AUTH_TOKEN` repository secret is required. Existing npm account security settings do not need to be weakened.
 
-9. Create and push the tag on the published commit.
-   在已发布的提交上创建并推送标签。
+各字段区分大小写，文件名不包含目录。仅填写表单并不代表已保存信任关系，需完成认证并确认连接出现在列表中。不需要仓库令牌密钥，也不需要降低 npm 账号安全设置。
+
+The GitHub `npm` environment allows only `v*` tags. Validation runs without OIDC permissions; only the publishing job receives `id-token: write`. Actions are pinned to commit hashes, checkout does not persist credentials, and release builds disable dependency caching. GitHub-hosted Ubuntu uses Node.js 24 and npm 11.16.0 (OIDC requires npm ≥11.5.1 and Node ≥22.14).
+
+GitHub 的 `npm` 环境仅允许 `v*` 标签部署。验证任务没有 OIDC 权限，仅发布任务获得令牌写权限。Actions 固定到提交哈希，检出不持久化凭证，发布构建关闭依赖缓存。使用 GitHub 托管 Ubuntu、Node.js 24 和 npm 11.16.0，满足 OIDC 最低版本要求。
+
+## Validate without publishing / 不发布的验证
+
+From the repository's Actions tab, choose **Publish to npm / 发布到 npm**, select `main`, and run with `dry_run=true` (the default). It installs locked dependencies, typechecks, tests and inspects the package. The publish job is skipped; this does not prove npm OIDC authentication works.
+
+在仓库 Actions 页面选择发布工作流，选取 `main`，使用默认的 `dry_run=true` 执行。流程安装锁定依赖、类型检查、测试并检查包内容；跳过发布任务，因此不能证明 npm OIDC 认证可用。
+
+```bash
+gh workflow run publish.yml --ref main -f dry_run=true
+```
+
+## Publish a new version / 发布新版本
+
+1. Confirm a clean worktree and review changes. Update README, SECURITY and CHANGELOG as needed. All Markdown, comments, commit and tag messages must be English + Simplified Chinese.
+   确认工作区干净并审查修改，按需更新上述文档；所有 Markdown、注释、提交和标签信息使用英文＋简体中文。
+2. Increment `package.json` and the lockfile without automatically creating a tag. For the next patch after 0.1.0:
+   更新版本和锁文件，不自动创建标签。0.1.0 之后的补丁版示例：
 
    ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0 / 发布 v0.1.0"
-   git push origin v0.1.0
+   npm version patch --no-git-tag-version
+   npm ci
+   npm run check
+   npm pack --dry-run
+   git diff --check
    ```
 
-10. Verify a clean working tree and matching local/remote commits. Record commit, tag, npm URL and validation results in both languages.
-    验证工作区干净、本地远端提交一致，以双语记录提交、标签、npm 地址和验证结果。
+3. Review and stage only intended changes; commit and push `main` with a bilingual message. The following assumes the next version is 0.1.1:
+   审查并暂存预期修改，用双语提交并推送主分支。以下假设下个版本是 0.1.1：
 
-## Failure handling / 失败处理
+   ```bash
+   git add package.json package-lock.json CHANGELOG.md
+   git commit -m "chore: prepare v0.1.1 / 准备 v0.1.1"
+   git push origin main
+   git tag -a v0.1.1 -m "Release v0.1.1 / 发布 v0.1.1"
+   git push origin v0.1.1
+   ```
 
-- Git push failure: preserve the local commit, fix remote/permission issues and retry without force-pushing.
-  推送失败时保留本地提交，解决远端或权限问题后重试，不强推。
-- npm failure: preserve the pushed commit and report failure; never claim publication succeeded.
-  npm 失败时保留已推送提交并明确报告，不宣称已发布。
-- npm timeout: query the exact version before retrying, because publication may already have succeeded.
-  npm 超时时先查精确版本，避免实际已成功而重复发布。
-- Tag push failure after npm success: record that npm is published and retry the tag push later; do not republish the same version.
-  npm 成功但标签推送失败时记录已发布状态，后续补推标签，不重发同一版本。
+4. **The tag push triggers npm publication automatically.** The workflow rejects tags that do not exactly match `package.json`. Only stable `X.Y.Z` releases are supported; prereleases need a separate dist-tag policy before enabling them. It runs `npm publish --access public --provenance`; `prepublishOnly` repeats validation. Publishing jobs are serialized and never cancelled by a newer release.
+   **推送标签会自动触发 npm 发布。** 标签必须精确匹配包版本，目前仅支持稳定版 `X.Y.Z`；预发布版本需先增加分发标签策略。流程公开发布并附来源证明，发布前再次验证；发布任务串行执行，不被后续发布取消。
+5. Verify the Actions run, exact registry version, `latest` and provenance. Record commit, tag, npm URL and results in both languages. Do not claim success based only on a tag push.
+   验证 Actions 结果、registry 精确版本、最新标签和来源证明，以双语记录提交、标签、npm 地址和结果，不能仅凭标签已推送就宣称成功。
+
+   ```bash
+   npm view pi-information-protecter@0.1.1 version dist.integrity dist.tarball --json
+   npm view pi-information-protecter dist-tags --json
+   ```
+
+## Recovery / 失败恢复
+
+- If authentication fails, verify npm trust, exact workflow filename, environment, repository URL and completion of 2FA. Do not add a write token as an automatic fallback.
+  认证失败时检查信任配置、文件名、环境、仓库地址及双因素认证完成情况，不自动回退写入令牌。
+- A failed release can be rerun from Actions, or manually dispatched with the matching tag and `dry_run=false`, after fixing external configuration. Branch-based real publishing is rejected.
+  修复外部配置后可重跑失败任务，或针对匹配标签以 `dry_run=false` 手动执行；拒绝从分支执行真实发布。
+- On timeout, query the exact npm version before retrying. Published versions are immutable. Never move a release tag or force-push to conceal a failure; use a new version for source fixes.
+  超时先查询精确 npm 版本再重试；已发布版本不可覆盖。不要移动标签或强推掩盖失败，源码修复使用新版本。
+
+References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) and [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
+
+参考资料：上述 npm 官方可信发布和来源证明文档。
