@@ -1,6 +1,18 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.2.0 — Machine configuration and memory cache / 机器配置与内存缓存
+
+- Derive deterministic filenames from OS machine identifiers using a product-specific hash; never fall back to random IDs.
+  使用产品专用哈希派生确定性机器配置名称，不回退随机标识。
+- Validate and union-merge legacy/previous-machine configs before durable target writes and verified old-file deletion, with locking and retry-safe cleanup.
+  校验并合并旧名称及旧机器配置，持久化验证目标后删除旧文件，支持锁与可重试清理。
+- Cache rules at startup/reload; outgoing requests and status no longer read configuration files. Loaded protection survives file edits or deletion.
+  启动和重载时缓存规则，出站请求和状态不再读配置；加载后的防护不受文件修改或删除影响。
+- Make `/protecter reload` invoke Pi reload; check file-tool target paths instead of documentation content.
+  重载命令调用 Pi 重载，文件工具改为检查目标路径而非文档正文。
+- Add migration, failure-injection, concurrency and cache regression tests, plus bilingual migration documentation.
+  增加迁移、故障注入、并发及缓存回归测试和双语迁移文档。
+
 
 - Add tag-triggered GitHub Actions npm OIDC publishing, scoped environment permissions and manual dry-run validation.
   增加标签触发的 GitHub Actions npm OIDC 发布、限定环境权限及手动试运行验证。

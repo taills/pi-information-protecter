@@ -20,7 +20,7 @@ export interface Config {
 }
 export const DEFAULT_CONFIG: Config = { version: 1, sensitiveWords: [] };
 export const CONFIG_ERROR =
-  "protecter: 配置无法安全读取或格式无效；请在本地修复 protecter.json。";
+  "SPI Protecter: unsafe or invalid configuration / 配置不安全或格式无效，请在本地修复。";
 
 export function parseConfig(raw: string): Config {
   try {
@@ -60,7 +60,8 @@ export function parseConfig(raw: string): Config {
         )
           throw new Error();
         const re = new RegExp(rule.pattern, rule.flags ?? "");
-        if (re.test("")) throw new Error();
+        // Compilation only here; matching is bounded in the worker. / 此处仅编译，匹配在限时 worker 内执行。
+        void re;
       } else throw new Error();
     }
     return value;

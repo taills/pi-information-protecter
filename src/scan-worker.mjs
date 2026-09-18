@@ -4,7 +4,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import { randomBytes } from "node:crypto";
 
 try {
-  const { payload, rules, entries, configRaw } = workerData;
+  const { payload, rules, entries, configRaws } = workerData;
   const originalToToken = new Map(
     entries.map(([token, original]) => [original, token]),
   );
@@ -28,8 +28,8 @@ try {
     matchers.push({ literal: original });
   // Defense in depth for an accidentally pasted full configuration (not a sandbox).
   // 对意外粘贴的完整配置提供纵深防护，但这不是沙箱。
-  const compactConfig = JSON.stringify(JSON.parse(configRaw));
-  matchers.push({ literal: configRaw }, { literal: compactConfig });
+  const protectedTexts = [...new Set(configRaws.flatMap(raw => [raw, JSON.stringify(JSON.parse(raw))]))];
+  for (const literal of protectedTexts) matchers.push({ literal });
   const payloadText = JSON.stringify(payload);
   let matches = 0;
   let nodes = 0;
@@ -95,7 +95,7 @@ try {
   function walk(value, depth = 0) {
     if (++nodes > 200000 || depth > 80) throw new Error();
     if (typeof value === "string") {
-      if (value.includes(configRaw) || value.includes(compactConfig))
+      if (protectedTexts.some(text => value.includes(text)))
         return redact(value);
       // OpenAI serializes tool arguments as JSON strings: decode escapes BEFORE matching.
       // OpenAI 将工具参数序列化为 JSON 字符串，匹配前必须先解码转义。

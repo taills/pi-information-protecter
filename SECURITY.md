@@ -27,8 +27,10 @@ Prevent configured personal information from accidentally entering Pi LLM reques
   Pi 0.85.1 会捕获该钩子异常并继续使用当前请求体，因此错误路径返回空对象并尝试取消。这不保证没有 HTTP 请求，只保证本处理器不回退原始请求体。
 - Create configuration separately with Unix mode 0600. Reject links, non-regular files, multiple links and files owned by others. Users remain responsible for directories and OS permissions; TOCTOU races are not prevented.
   独立创建配置，Unix 权限为 0600；拒绝链接、非普通文件、多链接及他人所有文件。用户仍需维护目录和系统权限，无法防止检查与使用之间的竞态。
-- Direct-access blocking is supplementary. Shell can bypass string checks. Ancestor directory checks and mentions of the protected filename inside documentation can cause false positives.
-  直接访问拦截只是补充；shell 可绕过字符串检查，祖先目录检查及文档中提及受保护文件名都可能误拦截。
+- Direct-access blocking is supplementary. File tools inspect target paths rather than document bodies. Shell can bypass string checks, and command mentions or ancestor directory checks can still cause false positives.
+  直接访问拦截只是补充；文件工具检查目标路径而非正文。shell 可绕过字符串检查，命令提及及祖先目录检查仍可能误拦截。
+- Startup/reload validates and merges machine-hash configurations before caching. Requests use memory only; file deletion does not revoke cached secrets. Reload or process exit clears the instance. Migration uses commit-before-delete and a cooperating-process lock, not a multi-file transaction or protection against hostile local writers. Stale locks require local inspection; Windows does not provide POSIX directory fsync.
+  启动或重载时校验并合并机器哈希配置后缓存，请求只使用内存；文件删除不撤销缓存秘密，重载或退出才清理实例。迁移采用先提交后删除及协作进程锁，并非多文件事务或恶意本地写入防护；残留锁需本地检查，Windows 无 POSIX 目录同步。
 - Whole-configuration text detection does not guarantee that every reformatted rule definition is masked.
   整体配置文本检测不保证所有重新格式化的规则定义都被遮盖。
 - Compaction and tree summaries are conservatively disabled. Do not widen Pi compatibility without verification.

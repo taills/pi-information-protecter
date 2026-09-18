@@ -2,5 +2,8 @@ node_modules/
 coverage/
 .playwright-mcp/
 protecter.json
+protecter.*.json
+!protecter.example.json
+.protecter-migration*
 *.log
 .DS_Store

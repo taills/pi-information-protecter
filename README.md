@@ -14,7 +14,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 
 ```bash
 # Install the published, pinned npm release. / 安装已发布的固定 npm 版本。
-pi install npm:pi-information-protecter@0.1.0
+pi install npm:pi-information-protecter@0.2.0
 
 # Alternatively, install from this repository without copying it. / 或从本仓库本地安装，不复制仓库。
 pi install "$PWD"
@@ -35,9 +35,17 @@ Maintainers publish new versions by pushing matching `v*` tags. GitHub Actions v
 
 维护者通过推送匹配版本的 `v*` 标签发布新版本。GitHub Actions 验证后使用 npm OIDC 可信发布，不需要长期令牌；手动试运行不会发布。
 
-The first session creates `~/.pi/agent/protecter.json`, respecting `PI_CODING_AGENT_DIR`. Existing configuration is not overwritten; project-local configuration is not loaded. Unix permissions are tightened to `0600`. Symlinks, hard links, files exceeding 1 MiB and files owned by another user are rejected. Windows users must configure ACLs separately.
+Initialization uses `~/.pi/agent/protecter.<machineHash>.json`, respecting `PI_CODING_AGENT_DIR`. The hash is the first 32 hex characters of SHA-256 over a product prefix and normalized OS ID: macOS `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`. Missing/invalid IDs fail initialization, without random fallback. The hash is a stable identifier, not a secret. Project-local configuration is not loaded.
 
-首次会话创建 `~/.pi/agent/protecter.json`，遵循 `PI_CODING_AGENT_DIR`。不覆盖已有配置，不加载项目级同名配置。Unix 权限收紧为 `0600`。拒绝符号链接、硬链接、超过 1 MiB 或属于其他用户的文件。Windows 用户需另行配置 ACL。
+初始化使用 `~/.pi/agent/protecter.<machineHash>.json`，遵循 `PI_CODING_AGENT_DIR`。哈希由产品前缀与规范化系统标识计算 SHA-256，取前 32 位十六进制；macOS 使用 `IOPlatformUUID`、Linux 使用 `/etc/machine-id`、Windows 使用 `MachineGuid`。标识缺失或无效时拒绝初始化，不随机回退。哈希是稳定标识而非秘密，不加载项目级配置。
+
+At startup and `/reload`, recognized old configs (including legacy `protecter.json`) are validated, union-merged and deduplicated into the current target. The target is durably written and verified before unchanged old files are deleted. Invalid sources abort migration without deleting originals. Unix permissions are `0600`; unsafe links, foreign ownership and oversized files are rejected. Windows users must configure ACLs separately. See [migration details](docs/MIGRATION.md).
+
+启动和重载时，识别到的旧配置（包括原固定文件名）会先验证，再合并去重到当前目标；目标持久化写入并验证后才删除未变化的旧文件。无效来源会中止迁移而不删除原文件。Unix 权限为 `0600`，拒绝不安全链接、他人所有文件和超限文件；Windows 需自行设置 ACL。详见迁移文档。
+
+Validated configuration is cached per extension instance. Outgoing scans and status commands never reread or stat configuration files. Editing, corrupting or deleting files after loading does not alter the active snapshot. Changes take effect on `/reload` (or `/protecter reload`, which invokes Pi reload). A new instance after session replacement also initializes once. If all configs are deleted, the next initialization creates an empty config and warns; the old memory does not survive teardown.
+
+验证后的配置按扩展实例缓存。出站扫描及状态命令不重新读取或检查配置文件；加载后修改、损坏或删除文件不改变当前快照。修改在重载后生效；`/protecter reload` 会调用 Pi 重载，会话切换产生的新实例也初始化一次。若全部配置已删除，下次初始化会创建空配置并警告，旧内存不跨实例销毁保留。
 
 ## Configuration / 配置
 
@@ -71,8 +79,8 @@ More examples are in [`protecter.example.json`](protecter.example.json); they ar
   合并重叠匹配，避免暴露长敏感值的后缀；同一实例内相同原文复用占位符。
 - Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
   已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
-- Configuration is read and validated for every request. `/protecter`, `/protecter status` and `/protecter reload` report counts only, never sensitive values. Adding secrets through command arguments is not supported.
-  每次请求重新读取并验证配置。上述命令只报告规则和映射数量，不打印敏感值，不支持通过命令参数添加秘密。
+- `/protecter` and `/protecter status` report cached counts only, without disk access or sensitive values. `/protecter reload` waits for idle and invokes Pi's full reload; it is no longer a status-only command. Adding secrets through command arguments is not supported.
+  状态命令只报告缓存数量，不访问磁盘或显示敏感值。重载命令等待空闲并调用 Pi 完整重载，不再只是查询状态；不支持通过命令参数添加秘密。
 - Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
   限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
 
@@ -106,8 +114,8 @@ Local response and tool-argument restoration / 本地回复和工具参数还原
 
 **以出站脱敏为主，直接访问拦截为辅。** 不全面禁用 shell。
 
-- Block tool inputs explicitly mentioning `protecter.json`, including common read/write/edit and shell commands. Because all arguments are checked, merely mentioning the filename in documentation can also be blocked.
-  拦截明确提及配置文件名的工具输入，包括常见读写、编辑和 shell 命令。由于检查全部参数，在文档中仅提及文件名也可能被误拦截。
+- File tools check actual path arguments, not document bodies; writing documentation that mentions config filenames is allowed. In the active config directory, legacy/current hash filenames and migration artifacts are protected. Shell command fields retain best-effort filename checks, so shell mentions can still produce false positives.
+  文件工具检查实际路径参数而非正文，允许文档提及配置名称。当前配置目录内的旧名称、哈希名称及迁移文件受保护；shell 命令字段保留尽力文件名检查，因此 shell 提及名称仍可能误拦截。
 - Resolve `@`, `~`, relative paths and `file://`; check symlink/inode aliases. Block `grep/find/ls` over ancestor directories containing the configuration.
   解析上述路径形式，检查符号链接和 inode 别名；阻止这些搜索工具扫描包含配置的祖先目录。
 - Attempt whole-text masking if the complete original configuration accidentally appears in a request.

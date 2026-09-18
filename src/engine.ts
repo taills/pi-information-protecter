@@ -1,6 +1,7 @@
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
-import { loadConfig } from "./config.ts";
+import { migrateConfig, type Snapshot } from "./migration.ts";
+import { getMachineHash } from "./machine.ts";
 
 export const REQUEST_ERROR =
   "protecter: 请求已清空。配置无效、扫描超时或包含不支持的附件；修复后重试。";
@@ -9,14 +10,23 @@ export class Protecter {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly workers = new Set<Worker>();
   private closed = false;
+  private snapshot?: Snapshot;
   constructor(
-    readonly configPath: string,
+    private readonly configDir: string,
     private readonly timeoutMs = 2000,
+    private readonly machineId: () => string = getMachineHash,
   ) {}
 
-  initialize(): void {
-    loadConfig(this.configPath, true);
+  async initialize(): Promise<void> {
+    if (this.closed) throw new Error(REQUEST_ERROR);
+    this.snapshot = undefined;
+    const snapshot = await migrateConfig(this.configDir, this.machineId());
+    if (this.closed) throw new Error(REQUEST_ERROR);
+    this.snapshot = snapshot;
   }
+  get configPath(): string { return this.snapshot?.path ?? ""; }
+  get ruleCount(): number { return this.snapshot?.config.sensitiveWords.length ?? 0; }
+  get ready(): boolean { return !!this.snapshot && !this.closed; }
   get mappingCount(): number {
     return this.tokens.size;
   }
@@ -32,8 +42,8 @@ export class Protecter {
   }
 
   private async scan(payload: unknown): Promise<unknown> {
-    if (this.closed) throw new Error(REQUEST_ERROR);
-    const { config, raw } = loadConfig(this.configPath);
+    if (!this.ready) throw new Error(REQUEST_ERROR);
+    const { config, sourceRaws } = this.snapshot!;
     const serialized = JSON.stringify(payload);
     if (!serialized || Buffer.byteLength(serialized) > 8 * 1024 * 1024)
       throw new Error(REQUEST_ERROR);
@@ -52,8 +62,9 @@ export class Protecter {
             payload: snapshot,
             rules: config.sensitiveWords,
             entries: [...this.tokens],
-            configRaw: raw,
+            configRaws: sourceRaws,
           },
+          execArgv: [],
           resourceLimits: { maxOldGenerationSizeMb: 128 },
         },
       );
@@ -111,6 +122,7 @@ export class Protecter {
 
   close(): void {
     this.closed = true;
+    this.snapshot = undefined;
     this.tokens.clear();
     for (const worker of this.workers) void worker.terminate();
     this.workers.clear();

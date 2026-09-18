@@ -1,18 +1,47 @@
 {
   "name": "pi-information-protecter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sensitive Personal Information (SPI) Protecter — local reversible privacy redaction for Pi",
   "type": "module",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/taills/pi-information-protecter.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/taills/pi-information-protecter.git"
+  },
   "homepage": "https://github.com/taills/pi-information-protecter#readme",
-  "bugs": { "url": "https://github.com/taills/pi-information-protecter/issues" },
-  "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
-  "keywords": ["pi-package", "pi-extension", "privacy", "redaction"],
-  "files": ["src", "README.md", "SECURITY.md", "CHANGELOG.md", "protecter.example.json", "LICENSE"],
-  "pi": { "extensions": ["./src/index.ts"] },
-  "engines": { "node": ">=22" },
-  "peerDependencies": { "@earendil-works/pi-coding-agent": ">=0.85.1 <0.86.0" },
+  "bugs": {
+    "url": "https://github.com/taills/pi-information-protecter/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "privacy",
+    "redaction"
+  ],
+  "files": [
+    "src",
+    "README.md",
+    "SECURITY.md",
+    "CHANGELOG.md",
+    "docs/MIGRATION.md",
+    "protecter.example.json",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.85.1 <0.86.0"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@types/node": "^22.0.0",

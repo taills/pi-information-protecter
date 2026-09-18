@@ -3,8 +3,6 @@ import {
   VERSION,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { join } from "node:path";
-import { loadConfig } from "./config.ts";
 import { Protecter, REQUEST_ERROR } from "./engine.ts";
 import { blocksConfigAccess } from "./guard.ts";
 
@@ -13,21 +11,21 @@ import { blocksConfigAccess } from "./guard.ts";
  * 请将本扩展放在其他改写出站请求体的扩展之后加载。
  */
 export default function informationProtecter(pi: ExtensionAPI): void {
-  const engine = new Protecter(join(getAgentDir(), "protecter.json"));
+  const engine = new Protecter(getAgentDir());
   const compatible =
     /^0\.85\./.test(VERSION) && Number(VERSION.split(".")[2]) >= 1;
   let healthy = false;
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", async (_event, ctx) => {
     try {
       if (!compatible) throw new Error();
-      engine.initialize();
+      await engine.initialize();
       healthy = true;
-      const count = loadConfig(engine.configPath).config.sensitiveWords.length;
+      const count = engine.ruleCount;
       ctx.ui.setStatus("protecter", `SPI Protecter · ${count} rules`);
       if (count === 0)
         ctx.ui.notify(
-          "SPI Protecter：敏感词数组为空，请在本地编辑 protecter.json 后使用。",
+          "SPI Protecter: empty rules; edit local machine config and /reload / 规则为空，请编辑本地机器配置后重载。",
           "warning",
         );
     } catch {
@@ -129,7 +127,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   );
 
   pi.registerCommand("protecter", {
-    description: "SPI Protecter 状态与本地配置校验（不显示敏感值）",
+    description: "SPI Protecter memory status / 内存状态（不显示敏感值）",
     handler: async (args, ctx) => {
       if (args.trim() && !["status", "reload"].includes(args.trim())) {
         ctx.ui.notify(
@@ -138,18 +136,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         );
         return;
       }
-      try {
-        if (!compatible) throw new Error();
-        const { config } = loadConfig(engine.configPath);
-        healthy = true;
-        ctx.ui.notify(
-          `SPI Protecter：${config.sensitiveWords.length} 条规则；${engine.mappingCount} 个内存映射。配置每次请求重新读取。`,
-          "info",
-        );
-      } catch {
-        healthy = false;
-        ctx.ui.notify(REQUEST_ERROR, "error");
+      if (args.trim() === "reload") {
+        await ctx.waitForIdle();
+        await ctx.reload();
+        return;
       }
+      ctx.ui.notify(
+        `SPI Protecter: ${engine.ready ? "ready / 就绪" : "not ready / 未就绪"}; ${engine.ruleCount} rules / 规则; ${engine.mappingCount} mappings / 映射. Memory snapshot; /reload to refresh / 内存快照，重载后更新。`,
+        engine.ready ? "info" : "error",
+      );
     },
   });
   pi.on("session_shutdown", () => engine.close());

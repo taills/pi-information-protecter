@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { CONFIG_NAME } from "./migration.ts";
 import { fileURLToPath } from "node:url";
 
 function normalized(path: string, cwd: string): string {
@@ -44,10 +45,13 @@ export function blocksConfigAccess(
   cwd: string,
   configPath: string,
 ): boolean {
+  if (!configPath) return true;
   const target = canonical(resolve(configPath));
-  const serialized = JSON.stringify(input);
-  if (/protecter\.json/i.test(serialized) || serialized.includes(configPath))
-    return true;
+  // Inspect executable fields, not document bodies. / 检查可执行字段，不检查文档正文。
+  if (["bash", "powershell"].includes(tool)) {
+    const command = typeof input.command === "string" ? input.command : "";
+    if (/protecter(?:\.[a-f0-9]{32})?\.json|\.protecter-migration/i.test(command) || command.includes(configPath)) return true;
+  }
   const candidate = input.path ?? input.file_path ?? input.filePath;
   const recursive = ["grep", "find", "ls"].includes(tool);
   if (typeof candidate !== "string" && !recursive) return false;
@@ -58,6 +62,7 @@ export function blocksConfigAccess(
     );
     const real = canonical(path);
     return (
+      (dirname(real) === dirname(target) && (CONFIG_NAME.test(basename(real)) || basename(real).startsWith(".protecter-migration"))) ||
       real === target ||
       sameFile(path, configPath) ||
       (recursive && contains(real, target))

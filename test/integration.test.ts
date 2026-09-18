@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
@@ -70,15 +70,12 @@ test("real Pi jiti loader + runner: outgoing payload, message restoration, tool 
       getSystemPrompt: () => "",
     } satisfies ExtensionContextActions,
   );
+  writeFileSync(join(dir, "protecter.json"), JSON.stringify({ version: 1, sensitiveWords: ["fake-private-password"] }));
   await runner.emit({ type: "session_start", reason: "startup" });
   t.after(async () => {
     await runner.emit({ type: "session_shutdown", reason: "quit" });
   });
-  const path = join(dir, "protecter.json");
-  writeFileSync(
-    path,
-    JSON.stringify({ version: 1, sensitiveWords: ["fake-private-password"] }),
-  );
+  const path = join(dir, readdirSync(dir).find(name => /^protecter\.[a-f0-9]{32}\.json$/.test(name))!);
   const outgoing = (await runner.emitBeforeProviderRequest({
     model: "demo",
     messages: [{ role: "user", content: "fake-private-password" }],
@@ -183,7 +180,10 @@ test("real Pi jiti loader + runner: outgoing payload, message restoration, tool 
   });
   assert.ok(!JSON.stringify(followup).includes("fake-private-password"));
 
+  rmSync(path);
+  assert.ok(!JSON.stringify(await runner.emitBeforeProviderRequest({ text: "fake-private-password" })).includes("fake-private-password"));
   writeFileSync(path, "invalid-secret-config");
+  await runner.emit({ type: "session_start", reason: "reload" });
   assert.deepEqual(
     await runner.emitBeforeProviderRequest({
       messages: [{ content: "must-never-leave" }],

@@ -17,37 +17,38 @@ import { loadConfig, parseConfig, type Rule } from "../src/config.ts";
 import { Protecter } from "../src/engine.ts";
 import { blocksConfigAccess } from "../src/guard.ts";
 
-function fixture(
+async function fixture(
   t: { after(fn: () => void): void },
   words: Rule[] = [],
   timeout = 2000,
 ) {
   const dir = mkdtempSync(join(tmpdir(), "spi-test-"));
   const path = join(dir, "protecter.json");
-  const engine = new Protecter(path, timeout);
-  engine.initialize();
+  const engine = new Protecter(dir, timeout, () => "a".repeat(32));
   const save = (rules: Rule[]) =>
     writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: rules }));
   save(words);
+  await engine.initialize();
+  const activePath = engine.configPath;
+  const saveActive = (rules: Rule[]) => writeFileSync(activePath, JSON.stringify({ version: 1, sensitiveWords: rules }));
   t.after(() => {
     engine.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  return { dir, path, engine, save };
+  return { dir, path: activePath, engine, save: saveActive };
 }
 
-test("configuration is private, non-destructive, strict and has sanitized errors", (t) => {
-  const { path, engine } = fixture(t, ["private-value"]);
+test("configuration is private, non-destructive, strict and has sanitized errors", async (t) => {
+  const { path, engine } = await fixture(t, ["private-value"]);
   const before = readFileSync(path, "utf8");
   chmodSync(path, 0o644);
-  engine.initialize();
+  await engine.initialize();
   assert.equal(readFileSync(path, "utf8"), before);
   if (process.platform !== "win32")
     assert.equal(statSync(path).mode & 0o777, 0o600);
   for (const sensitiveWords of [
     [""],
     [{ type: "regex", pattern: "(" }],
-    [{ type: "regex", pattern: ".*" }],
     [{ type: "regex", pattern: "x", flags: "y" }],
     [{ type: "literal", value: "x", typo: 1 }],
   ]) {
@@ -65,8 +66,8 @@ test("configuration is private, non-destructive, strict and has sanitized errors
   );
 });
 
-test("reject symlink and hard-linked config files", (t) => {
-  const { dir, path } = fixture(t);
+test("reject symlink and hard-linked config files", async (t) => {
+  const { dir, path } = await fixture(t);
   const alias = join(dir, "alias");
   symlinkSync(path, alias);
   assert.throws(() => loadConfig(alias));
@@ -82,7 +83,7 @@ test("redact all payload text and restore without mutating local source", async 
     "fake-password",
     "13800138000",
   ];
-  const { engine } = fixture(t, words);
+  const { engine } = await fixture(t, words);
   const payload = {
     model: "safe-model",
     system: "用户 张三",
@@ -110,21 +111,21 @@ test("redact all payload text and restore without mutating local source", async 
 });
 
 test("same value reuses random token, parallel scans agree and tokens are idempotent", async (t) => {
-  const { engine } = fixture(t, ["secret"]);
+  const { engine } = await fixture(t, ["secret"]);
   const [a, b] = await Promise.all([
     engine.redact("secret"),
     engine.redact("secret"),
   ]);
   assert.equal(a, b);
   assert.equal(await engine.redact(a), a);
-  const other = fixture(t, ["secret"]).engine;
+  const other = (await fixture(t, ["secret"])).engine;
   assert.notEqual(await other.redact("secret"), a);
   const fabricated = `__PIP_${"a".repeat(48)}__`;
   assert.equal(engine.restoreText(fabricated), fabricated);
 });
 
 test("regex captures replace only full match, retain exact case, and handle overlapping rules", async (t) => {
-  const { engine } = fixture(t, [
+  const { engine } = await fixture(t, [
     "abc",
     "bcde",
     { type: "regex", pattern: "(?<=Bearer )[A-Z]+", flags: "i" },
@@ -140,7 +141,7 @@ test("regex captures replace only full match, retain exact case, and handle over
 });
 
 test("learned regex matches remain protected after context loss and rule removal", async (t) => {
-  const { engine, save } = fixture(t, [
+  const { engine, save } = await fixture(t, [
     { type: "regex", pattern: "(?<=Bearer )[A-Za-z]+" },
   ]);
   const masked = (await engine.redact("Bearer PrivateToken")) as string;
@@ -153,7 +154,7 @@ test("learned regex matches remain protected after context loss and rule removal
 
 test("JSON-encoded arguments unescape sensitive values before matching", async (t) => {
   const secret = 'p\\a"ss\nword';
-  const { engine } = fixture(t, [secret]);
+  const { engine } = await fixture(t, [secret]);
   const payload = { arguments: JSON.stringify({ password: secret }) };
   const masked = (await engine.redact(payload)) as typeof payload;
   const decoded = JSON.parse(masked.arguments);
@@ -164,12 +165,12 @@ test("JSON-encoded arguments unescape sensitive values before matching", async (
 });
 
 test("rules spanning JSON syntax reject rather than silently bypass matching", async (t) => {
-  const { engine } = fixture(t, ['{"pin":"1234"}']);
+  const { engine } = await fixture(t, ['{"pin":"1234"}']);
   await assert.rejects(engine.redact({ arguments: '{"pin":"1234"}' }));
 });
 
 test("numeric IDs, unicode, full config and prototype keys", async (t) => {
-  const { engine, path } = fixture(t, ["13800138000", "姓名😀"]);
+  const { engine, path } = await fixture(t, ["13800138000", "姓名😀"]);
   const numeric = (await engine.redact({ number: 13800138000 })) as {
     number: string;
   };
@@ -187,20 +188,25 @@ test("numeric IDs, unicode, full config and prototype keys", async (t) => {
   assert.equal(roundtrip.__proto__, "姓名😀");
 });
 
-test("config changes apply to each request; corruption/deletion fails closed", async (t) => {
-  const { engine, path, save } = fixture(t, ["old"]);
-  const token = (await engine.redact("old")) as string;
+test("memory snapshot survives edits and deletion / 内存快照不受修改删除影响", async (t) => {
+  const { engine, path, save } = await fixture(t, ["old"]);
+  const token = await engine.redact("old");
   save(["new"]);
+  assert.equal(await engine.redact("new"), "new");
+  assert.equal(await engine.redact("old"), token);
+  await engine.initialize();
   assert.notEqual(await engine.redact("new"), "new");
-  assert.equal(engine.restoreText(token), "old");
   writeFileSync(path, "broken-private-config");
-  await assert.rejects(engine.redact("private-input"));
+  assert.notEqual(await engine.redact("new"), "new");
   rmSync(path);
-  await assert.rejects(engine.redact("private-input"));
+  assert.notEqual(await engine.redact("new"), "new");
+  writeFileSync(path, "broken-private-config");
+  await assert.rejects(engine.initialize());
+  await assert.rejects(engine.redact("new"));
 });
 
 test("regex timeout and zero-width runtime matches fail without leaking or hanging", async (t) => {
-  const { engine, save } = fixture(
+  const { engine, save } = await fixture(
     t,
     [{ type: "regex", pattern: "(a+)+$" }],
     150,
@@ -209,11 +215,12 @@ test("regex timeout and zero-width runtime matches fail without leaking or hangi
   await assert.rejects(engine.redact("a".repeat(10000) + "!"));
   assert.ok(Date.now() - started < 3000);
   save([{ type: "regex", pattern: "(?=x)" }]);
+  await engine.initialize();
   await assert.rejects(engine.redact("x"));
 });
 
 test("common opaque attachments and limits are rejected", async (t) => {
-  const { engine } = fixture(t);
+  const { engine } = await fixture(t);
   for (const payload of [
     { content: [{ type: "image", data: "secret-binary" }] },
     { content: [{ type: "input_image", image_url: "https://image" }] },
@@ -225,8 +232,8 @@ test("common opaque attachments and limits are rejected", async (t) => {
     await assert.rejects(engine.redact(payload));
 });
 
-test("path guard handles relative, @, file URL, symlink, hardlink, parents and shell mention", (t) => {
-  const { path, dir } = fixture(t);
+test("path guard handles relative, @, file URL, symlink, hardlink, parents and shell mention", async (t) => {
+  const { path, dir } = await fixture(t);
   const alias = join(dir, "alias");
   symlinkSync(path, alias);
   for (const candidate of [
@@ -259,6 +266,7 @@ test("path guard handles relative, @, file URL, symlink, hardlink, parents and s
     blocksConfigAccess("read", { path: "src/app.ts" }, dir, path),
     false,
   );
+  assert.equal(blocksConfigAccess("write", { path: "README.md", content: `protecter.json ${path}` }, dir, path), false);
   assert.equal(
     blocksConfigAccess("bash", { command: "npm test" }, dir, path),
     false,
@@ -266,7 +274,7 @@ test("path guard handles relative, @, file URL, symlink, hardlink, parents and s
 });
 
 test("shutdown destroys mappings and prevents future scans", async (t) => {
-  const { engine } = fixture(t, ["secret"]);
+  const { engine } = await fixture(t, ["secret"]);
   const token = (await engine.redact("secret")) as string;
   engine.close();
   assert.equal(engine.mappingCount, 0);
