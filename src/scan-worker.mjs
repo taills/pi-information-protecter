@@ -1,4 +1,5 @@
 // A separate worker bounds user-supplied JavaScript regex execution (including ReDoS).
+// 独立 worker 限制用户正则的执行时间，包括正则拒绝服务风险。
 import { parentPort, workerData } from "node:worker_threads";
 import { randomBytes } from "node:crypto";
 
@@ -20,10 +21,13 @@ try {
     };
   });
   // A restored value may lose its original regex context (e.g. a Bearer prefix).
+  // 还原后的值可能失去原始正则上下文，例如 Bearer 前缀。
   // Keep learned originals protected for the lifetime of this extension instance.
+  // 在当前扩展实例的整个生命周期内继续保护已识别的原文。
   for (const original of originalToToken.keys())
     matchers.push({ literal: original });
   // Defense in depth for an accidentally pasted full configuration (not a sandbox).
+  // 对意外粘贴的完整配置提供纵深防护，但这不是沙箱。
   const compactConfig = JSON.stringify(JSON.parse(configRaw));
   matchers.push({ literal: configRaw }, { literal: compactConfig });
   const payloadText = JSON.stringify(payload);
@@ -57,7 +61,7 @@ try {
         while ((start = text.indexOf(matcher.literal, start)) !== -1) {
           spans.push([start, start + matcher.literal.length]);
           if (++matches > 100000) throw new Error();
-          start++; // Include overlapping occurrences.
+          start++; // Include overlapping occurrences. / 包含重叠匹配。
         }
       }
     }
@@ -78,6 +82,7 @@ try {
   }
   function redact(text) {
     // Only OUR tokens are exempt, not arbitrary strings with a similar prefix.
+    // 仅豁免本实例生成的占位符，不豁免具有相似前缀的任意字符串。
     let result = "",
       cursor = 0;
     for (const match of text.matchAll(/__PIP_[a-f0-9]{48}__/g)) {
@@ -93,19 +98,22 @@ try {
       if (value.includes(configRaw) || value.includes(compactConfig))
         return redact(value);
       // OpenAI serializes tool arguments as JSON strings: decode escapes BEFORE matching.
+      // OpenAI 将工具参数序列化为 JSON 字符串，匹配前必须先解码转义。
       if (/^\s*[[{]/.test(value)) {
         let parsed;
         try {
           parsed = JSON.parse(value);
         } catch {
-          /* ordinary prose */
+          /* Ordinary prose. / 普通文本。 */
         }
         if (parsed && typeof parsed === "object") {
           const inner = JSON.stringify(walk(parsed, depth + 1));
           const outer = redact(inner);
           if (outer === inner) return inner;
           // A rule may span JSON syntax or match a whole JSON-shaped secret.
+          // 规则可能跨越 JSON 语法，或匹配整个 JSON 形式的敏感值。
           // Return altered JSON only if it still parses; otherwise reject the request.
+          // 仅返回仍可解析的修改后 JSON，否则拒绝请求。
           JSON.parse(outer);
           return outer;
         }
@@ -119,6 +127,7 @@ try {
     if (Array.isArray(value)) return value.map((item) => walk(item, depth + 1));
     if (value && typeof value === "object") {
       // No claim to perform OCR or redact opaque attachments. Reject rather than leak.
+      // 不提供 OCR 或不透明附件脱敏，宁可拒绝请求也不放行泄漏。
       if (
         typeof value.type === "string" &&
         /image|audio|video|document|(^|_)file($|_)/i.test(value.type)
@@ -146,5 +155,6 @@ try {
   parentPort.postMessage({ payload: walk(payload), additions });
 } catch {
   // Never serialize an exception, original payload or configuration back into diagnostics.
+  // 不将异常、原始请求体或配置序列化到诊断信息中。
   parentPort.postMessage({ failed: true });
 }

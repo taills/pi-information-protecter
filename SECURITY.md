@@ -1,30 +1,48 @@
-# SPI Protecter 安全边界
+# SPI Protecter security boundaries / SPI Protecter 安全边界
 
-## 目标
+## Goal / 目标
 
-防止正常使用 Pi 时，已配置的个人敏感信息以原始文本意外进入 LLM 请求体。威胁模型假设 Pi 核心、provider 实现、操作系统及其他已加载扩展可信，且该扩展成功加载、最终 hook 确实被调用。
+Prevent configured personal information from accidentally entering Pi LLM request bodies as plaintext. This assumes trusted Pi core, provider implementations, OS and installed extensions, successful extension loading and invocation of the final request hook.
 
-## 非目标
+防止已配置的个人信息意外以明文进入 Pi 的 LLM 请求体。前提是 Pi 核心、提供商实现、操作系统和已加载扩展可信，且插件成功加载、最终请求钩子确实执行。
 
-- 不是操作系统沙箱，不防御同 UID 程序、恶意扩展、任意代码执行、调试器或内存抓取。
-- 不防御对文本任意编码、拆分、翻译、截图／OCR后的重构；不提供自动隐私分类或形式化匿名化。
-- 不保护网关认证 header、网关 endpoint、工具请求、独立 SDK 请求、遥测、会话导出或 `/share`。
-- 不加密本地配置／会话／终端，也不在秘密被模型推断出来后自动阻止它外传。
+## Non-goals / 非目标
 
-## 实现策略
+- No OS sandbox or defense against same-UID programs, malicious extensions, arbitrary code execution, debuggers or memory inspection.
+  不提供操作系统沙箱，不防御同 UID 程序、恶意扩展、任意代码执行、调试器或内存检查。
+- No protection against arbitrary encoding, splitting, translation or screenshot/OCR reconstruction; no automatic privacy classification or formal anonymization.
+  不防御任意编码、拆分、翻译和截图／OCR 重构，不提供自动隐私分类或形式化匿名化。
+- No coverage for gateway authentication headers/endpoints, tool requests, independent SDK calls, telemetry, session exports or `/share`.
+  不覆盖网关认证头与地址、工具请求、独立 SDK 调用、遥测、会话导出或分享。
+- No local configuration/session/terminal encryption, nor automatic prevention of exfiltration after a model infers a secret.
+  不加密本地配置、会话和终端，也不会在模型推断出秘密后自动阻止外传。
 
-- 全 payload 文本出口扫描；随机 192-bit 占位符，只在本地内存保存反向映射。
-- 正则 worker 2 秒超时、资源及输入限制。异常不包含原始配置、规则或请求文本。
-- Pi 0.85.1 runner 会捕获 before_provider_request 异常并继续发送当前 payload，因此错误路径必须返回安全替代 `{}`，并尽力 abort。不能宣传为“一定没有 HTTP 请求”，只能保证该处理器不回退原始 payload。
-- 配置单独创建，Unix 0600，读取时拒绝链接／非普通文件／多链接／其他用户所有文件。目录和操作系统权限仍需用户维护；路径检查存在 TOCTOU，不能抵御恶意本地并发修改。
-- 直接文件访问拦截只是纵深防护。`bash` 可以绕过字符串检查；配置目录祖先保护会有误拦截。
-- 配置整体文本检测只是补充，不保证各种重新格式化后的规则定义都被掩盖。
-- 辅助压缩和树摘要保守禁用。未经验证的新 Pi 版本不应直接扩大兼容范围。
+## Implementation / 实现策略
 
-## 安全部署建议
+- Scan outgoing payload text; use random 192-bit placeholders and memory-only reverse mappings.
+  扫描出站请求体文本，使用随机 192-bit 占位符及仅内存反向映射。
+- Limit worker regex scans to 2 seconds, with resource and input limits. Errors exclude original configuration, rules and request text.
+  worker 正则扫描限制为 2 秒，并限制资源和输入；错误不包含原始配置、规则或请求文本。
+- Pi 0.85.1 catches `before_provider_request` errors and continues with the current payload. Error paths therefore return `{}` and attempt cancellation. This does not guarantee zero HTTP requests; it prevents this handler from falling back to the original payload.
+  Pi 0.85.1 会捕获该钩子异常并继续使用当前请求体，因此错误路径返回空对象并尝试取消。这不保证没有 HTTP 请求，只保证本处理器不回退原始请求体。
+- Create configuration separately with Unix mode 0600. Reject links, non-regular files, multiple links and files owned by others. Users remain responsible for directories and OS permissions; TOCTOU races are not prevented.
+  独立创建配置，Unix 权限为 0600；拒绝链接、非普通文件、多链接及他人所有文件。用户仍需维护目录和系统权限，无法防止检查与使用之间的竞态。
+- Direct-access blocking is supplementary. Shell can bypass string checks. Ancestor directory checks and mentions of the protected filename inside documentation can cause false positives.
+  直接访问拦截只是补充；shell 可绕过字符串检查，祖先目录检查及文档中提及受保护文件名都可能误拦截。
+- Whole-configuration text detection does not guarantee that every reformatted rule definition is masked.
+  整体配置文本检测不保证所有重新格式化的规则定义都被遮盖。
+- Compaction and tree summaries are conservatively disabled. Do not widen Pi compatibility without verification.
+  保守禁用压缩和树摘要，未经验证不扩大 Pi 兼容范围。
 
-1. 本地填写具体规则，确认状态与规则数量；空配置并不具备个人信息检测能力。
-2. 使用虚构样例在自己信任的测试网关抓取请求验证，绝不要用真实秘密测试。
-3. 避免同时使用上传日志／导出会话／自动遥测类扩展；确认 payload 处理顺序。
-4. 高风险环境用容器／独立用户／独立文件系统，把配置放在执行工具不可访问的位置；同时限制网络出口。单靠本扩展不能提供这层保证。
-5. 不向公共 issue 提交真实配置、映射、会话或含个人信息的抓包数据。
+## Deployment guidance / 安全部署建议
+
+1. Configure precise rules locally and check status/counts. Empty rules provide no SPI detection.
+   在本地配置具体规则并检查状态和数量；空规则不具备个人信息检测能力。
+2. Inspect requests using fictional data and a trusted test gateway; never test with real secrets.
+   使用虚构数据及可信测试网关检查请求，绝不用真实秘密测试。
+3. Avoid log-upload, session-export and telemetry extensions; verify payload handler ordering.
+   避免日志上传、会话导出和遥测类扩展，确认请求处理器顺序。
+4. Use containers, separate users/filesystems and network restrictions for high-risk environments. Keep configuration outside tool-accessible storage. This extension alone cannot enforce that isolation.
+   高风险环境使用容器、独立用户或文件系统及网络限制，将配置放在工具不可访问的位置；本扩展无法单独提供此隔离。
+5. Never post real configuration, mappings, sessions or personal-information packet captures in public issues.
+   不在公共问题报告中提交真实配置、映射、会话或含个人信息的抓包。

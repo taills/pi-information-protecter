@@ -34,7 +34,10 @@ function sameFile(a: string, b: string): boolean {
   }
 }
 
-/** Best-effort access guard. Arbitrary shell/third-party tools are NOT sandboxed. */
+/**
+ * Best-effort access guard. Arbitrary shell/third-party tools are NOT sandboxed.
+ * 尽力而为的访问防护，不对任意 shell 或第三方工具提供沙箱隔离。
+ */
 export function blocksConfigAccess(
   tool: string,
   input: Record<string, unknown>,

@@ -35,6 +35,7 @@ test("real Pi jiti loader + runner: outgoing payload, message restoration, tool 
     {} as ModelRegistry,
   );
   // Stub only the host UI/agent actions, not the extension, loader or middleware runner.
+  // 仅模拟宿主界面和智能体动作，不模拟扩展、加载器或中间件执行器。
   let aborted = false;
   runner.bindCore(
     {
@@ -176,6 +177,7 @@ test("real Pi jiti loader + runner: outgoing payload, message restoration, tool 
     undefined,
   );
   // The response is locally restored, then safely re-masked on the subsequent request.
+  // 响应在本地还原，并在后续请求中再次安全脱敏。
   const followup = await runner.emitBeforeProviderRequest({
     messages: [restored],
   });

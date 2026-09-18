@@ -8,7 +8,10 @@ import { loadConfig } from "./config.ts";
 import { Protecter, REQUEST_ERROR } from "./engine.ts";
 import { blocksConfigAccess } from "./guard.ts";
 
-/** Explicitly install this after other extensions that rewrite outgoing payloads. */
+/**
+ * Explicitly install this after other extensions that rewrite outgoing payloads.
+ * 请将本扩展放在其他改写出站请求体的扩展之后加载。
+ */
 export default function informationProtecter(pi: ExtensionAPI): void {
   const engine = new Protecter(join(getAgentDir(), "protecter.json"));
   const compatible =
@@ -41,25 +44,30 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       return payload;
     } catch {
       healthy = false;
-      // Pi catches thrown hook errors and continues with the ORIGINAL payload.
-      // Always return an empty replacement first; abort/notifications are best-effort.
+      // Pi catches hook errors and continues with the ORIGINAL payload.
+      // Pi 会捕获钩子异常并继续使用原始请求体。
+      // Always return an empty replacement; abort/notifications are best-effort.
+      // 必须返回空替代请求体；终止请求和通知仅作尽力处理。
       try {
         await ctx.abort();
       } catch {
-        /* replacement below remains mandatory */
+        /* Replacement below remains mandatory. / 仍须返回下方的替代请求体。 */
       }
       try {
         ctx.ui.notify(REQUEST_ERROR, "error");
       } catch {
-        /* never fail open */
+        /* Never fail open. / 不因异常放行原文。 */
       }
-      return {}; // May produce a provider validation error, but contains NO original data.
+      // May produce a provider validation error, but contains NO original data.
+      // 可能触发提供商校验错误，但不包含任何原始数据。
+      return {};
     }
   });
 
   pi.on("message_end", (event) => {
     if (event.message.role !== "assistant") return;
     // Preserve IDs, signatures, usage and provider metadata; only restore user-facing content.
+    // 保留 ID、签名、用量与提供商元数据，仅还原面向用户的内容。
     const message = event.message;
     return {
       message: {
@@ -105,8 +113,10 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     }
   });
 
-  // These auxiliary request paths have different lifecycle/response restoration semantics.
+  // These auxiliary requests have different lifecycle/response restoration semantics.
+  // 这些辅助请求具有不同的生命周期与响应还原语义。
   // Until separately verified, cancel instead of silently sending plaintext summaries.
+  // 在单独验证前取消这些请求，避免静默发送明文摘要。
   pi.on("session_before_compact", (_event, ctx) => {
     ctx.ui.notify(
       "SPI Protecter：暂不支持远程上下文压缩，请使用 /new 开始新会话。",

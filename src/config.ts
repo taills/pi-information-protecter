@@ -69,7 +69,10 @@ export function parseConfig(raw: string): Config {
   }
 }
 
-/** Do not follow a symlink, accept a hard-linked file, or print parser/OS errors containing secrets. */
+/**
+ * Reject symlinks and hard links; never print parser/OS errors containing secrets.
+ * 拒绝符号链接和硬链接；不输出可能包含敏感值的解析器或系统错误。
+ */
 export function loadConfig(
   path: string,
   create = false,

@@ -1,32 +1,45 @@
 # pi-information-protecter
 
-**个人敏感信息保护插件 — Sensitive Personal Information (SPI) Protecter。**
+**Sensitive Personal Information (SPI) Protecter — 个人敏感信息保护插件。**
 
-这是一个 Pi 扩展：在本地审查即将发往 LLM 网关的请求，用随机占位符替换配置中的个人敏感信息；模型返回占位符后，在本地还原为原始内容。可用于 URL、电话号码、身份证／ID、姓名、凭证、密码等。**它是规则驱动的意外泄漏防护，不是安全沙箱、自动 PII 识别器或加密代理。**
+A Pi extension that inspects outgoing LLM request bodies locally, replaces configured sensitive values with random placeholders, and restores echoed placeholders locally. Suitable for URLs, phone numbers, identity numbers, names, credentials and passwords. **This is rule-based accidental-disclosure protection, not a sandbox, automatic PII detector or encryption proxy.**
 
-## 安装
+这是一个 Pi 扩展：在本地审查 LLM 出站请求体，用随机占位符替换配置中的敏感值，并在本地还原模型返回的占位符。适用于 URL、电话号码、身份证／ID、姓名、凭证和密码。**这是基于规则的意外泄漏防护，不是沙箱、自动 PII 检测器或加密代理。**
 
-要求 Node.js 22+、`@earendil-works/pi-coding-agent` **0.85.1–0.85.x**（验证基线 0.85.1）。旧 `@mariozechner/*` 版本不在兼容范围内。
+## Installation / 安装
+
+Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, tested against 0.85.1. Legacy `@mariozechner/*` releases are not supported.
+
+要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**，验证基线为 0.85.1。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
-# 安装首个版本（固定版本便于复现）
+# Install the pinned npm release once published. / 发布后安装固定 npm 版本。
 pi install npm:pi-information-protecter@0.1.0
 
-# 或在源码仓库内本地安装；本地路径安装不会复制仓库
+# Alternatively, install from this repository without copying it. / 或从本仓库本地安装，不复制仓库。
 pi install "$PWD"
-# 或单次加载
+
+# Load for one invocation. / 单次加载。
 pi -e ./src/index.ts
 ```
 
-已运行的 Pi 请执行 `/reload`。插件注册了 worker，因此分发时需要保留完整 `src/` 目录，不能只复制 `index.ts`。
+Run `/reload` in an existing Pi session. Keep the complete `src/` directory when distributing this extension: the worker file is required, so copying only `index.ts` is insufficient.
 
-版本变更见 [CHANGELOG.md](CHANGELOG.md)。源码贡献与发布流程见仓库中的 `CONTRIBUTING.md` 和 `docs/RELEASING.md`。
+已运行的 Pi 请执行 `/reload`。分发时保留完整 `src/` 目录；插件需要 worker 文件，不能仅复制 `index.ts`。
 
-首次会话启动时创建 `~/.pi/agent/protecter.json`，遵循 Pi 的 `PI_CODING_AGENT_DIR` 覆盖设置。不会改写已有配置，不会读取项目级同名配置。Unix 文件权限收紧为 `0600`；符号链接、硬链接、多于 1 MiB 的配置和非当前用户所有的文件会被拒绝。Windows 还需用户自行配置 ACL。
+See [CHANGELOG.md](CHANGELOG.md) for version changes. Contribution and release instructions are in the repository's `CONTRIBUTING.md` and `docs/RELEASING.md`.
 
-## 配置敏感信息
+版本变更见 [CHANGELOG.md](CHANGELOG.md)。贡献与发布流程见仓库内的 `CONTRIBUTING.md` 和 `docs/RELEASING.md`。
 
-**请用本地编辑器编辑配置，不要让模型帮你填写真实密码，也不要把真实配置提交到 Git。** 初始数组为空，此时没有个人信息检测规则，界面会警告；插件不声称自动识别全部敏感信息。
+The first session creates `~/.pi/agent/protecter.json`, respecting `PI_CODING_AGENT_DIR`. Existing configuration is not overwritten; project-local configuration is not loaded. Unix permissions are tightened to `0600`. Symlinks, hard links, files exceeding 1 MiB and files owned by another user are rejected. Windows users must configure ACLs separately.
+
+首次会话创建 `~/.pi/agent/protecter.json`，遵循 `PI_CODING_AGENT_DIR`。不覆盖已有配置，不加载项目级同名配置。Unix 权限收紧为 `0600`。拒绝符号链接、硬链接、超过 1 MiB 或属于其他用户的文件。Windows 用户需另行配置 ACL。
+
+## Configuration / 配置
+
+**Edit the configuration in a local editor. Do not ask the model to enter real passwords or commit real configuration to Git.** The initial rule array is empty and provides no personal-information detection; the UI warns about this. The extension does not automatically identify all SPI.
+
+**请用本地编辑器修改配置，不要让模型填写真实密码，也不要把真实配置提交到 Git。** 初始规则数组为空，不具备个人信息检测能力，界面会给出警告。插件不会自动识别所有 SPI。
 
 ```json
 {
@@ -40,63 +53,96 @@ pi -e ./src/index.ts
 }
 ```
 
-更多示例见 [`protecter.example.json`](protecter.example.json)，这些仅为示例规则，不会自动启用。号码示例不做真实性／校验位检查，姓名和密码通常应使用精确值规则。
+More examples are in [`protecter.example.json`](protecter.example.json); they are not automatically enabled. Number patterns do not validate authenticity or check digits. Prefer exact values for names and passwords.
 
-- 字符串及 `literal`：大小写敏感、全量字面匹配（不是正则）。
-- `regex`：JavaScript 正则，替换**整个匹配**；需要只匹配凭证值时可用 lookbehind。支持 `g i m s u`，自动补 `g`。不支持 `/pattern/flags` 简写。
-- 正则中的反斜杠要按 JSON 规则写为 `\\`；不能匹配空字符串。运行中遇到零宽匹配会拒绝该请求。
-- 匹配重叠时合并区间，避免只遮住短词而暴露长词后缀；同一原文在当前扩展实例中复用同一个占位符。
-- 已匹配过的原文会在当前实例内继续按精确值保护，即使正则前缀消失或规则被删除。这样可以防止本地还原后的内容在后续请求中漏出；退出／重载后清除这些内存记录。
-- 每次请求重新读取、校验配置。`/protecter`、`/protecter status` 或 `/protecter reload` 只报告规则／内存映射数量，不打印敏感值。没有把敏感值通过命令参数添加的功能。
-- 配置最多 1000 条规则，每个词／模式最多 8192 字符；扫描时间上限 2 秒，请求 JSON 上限 8 MiB。超限拒绝，不降级为明文。
+更多示例见 [`protecter.example.json`](protecter.example.json)，不会自动启用。号码规则不验证真实性或校验位，姓名和密码建议使用精确值。
 
-## 工作方式
+- **Literals:** strings and `literal` rules match all case-sensitive occurrences, without regex interpretation.
+  **字面规则：**字符串和 `literal` 按大小写敏感方式匹配全部出现位置，不作正则解释。
+- **Regex:** JavaScript regex replaces the entire match. Use lookbehind to match only a credential value. Flags `g i m s u` are supported; `g` is added automatically. `/pattern/flags` shorthand is not supported.
+  **正则：**JavaScript 正则替换整个匹配，可用后行断言仅匹配凭证值。支持 `g i m s u`，自动补 `g`，不支持 `/pattern/flags` 简写。
+- Escape backslashes as `\\` in JSON. Empty-string matches are invalid; runtime zero-width matches reject the request.
+  JSON 中的反斜杠写作 `\\`。不允许匹配空字符串；运行时零宽匹配会拒绝请求。
+- Overlapping matches are merged to avoid exposing a longer secret's suffix. Equal values reuse a token within the extension instance.
+  合并重叠匹配，避免暴露长敏感值的后缀；同一实例内相同原文复用占位符。
+- Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
+  已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
+- Configuration is read and validated for every request. `/protecter`, `/protecter status` and `/protecter reload` report counts only, never sensitive values. Adding secrets through command arguments is not supported.
+  每次请求重新读取并验证配置。上述命令只报告规则和映射数量，不打印敏感值，不支持通过命令参数添加秘密。
+- Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
+  限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
+
+## How it works / 工作方式
 
 ```text
-用户输入／历史／工具结果／系统提示／工具定义
-                 ↓
-Pi before_provider_request：最终 JSON payload 文本扫描
-                 ↓
-__PIP_<192-bit random hex>__ → LLM 网关
-                 ↓
-模型回复 → 本地 message_end 还原 + tool_call 参数还原
+Input / history / tools / system prompt / tool definitions
+输入／历史／工具结果／系统提示／工具定义
+                         ↓
+before_provider_request: final JSON text scan / 最终 JSON 文本扫描
+                         ↓
+__PIP_<192-bit random hex>__ → LLM gateway / LLM 网关
+                         ↓
+Local response and tool-argument restoration / 本地回复和工具参数还原
 ```
 
-1. 扫描请求 JSON 的字符串、键和数字；也会解析 JSON 字符串形式的工具参数，避免转义隐藏匹配。不会修改本地用户输入或历史原文。
-2. 使用 `crypto.randomBytes(24)` 生成占位符。映射**只保存在内存**，不写配置、会话自定义条目、日志或模型提示。用户仍可在本地看到原文。
-3. 最终 assistant 文本、thinking 和工具参数还原；TUI 的 Markdown transformer 在完整占位符到达时还原流式显示，尚未到齐时可能暂时显示部分占位符。RPC/JSON 的流式 delta 仍为占位符，最终 `message_end` 还原。占位符被模型改写或截断时无法还原。
-4. 工具执行前还原参数，让合法的本地文件操作能够使用原始值；下一次请求再次脱敏。**恢复真实凭证并不是工具授权或防外传机制。**
-5. 正则匹配在可终止 worker 中运行，避免恶意／低效正则阻塞主线程。扫描失败时请求替换为 `{}` 并请求终止，不依赖会被 Pi 吞掉的 hook 异常。可能仍产生空请求或网关校验错误，但不返回原始 payload。
+1. Scan JSON strings, keys and numbers, including decoded JSON-string tool arguments. Local user input and original history are unchanged.
+   扫描 JSON 字符串、键和数字，包括解码后的 JSON 字符串工具参数；不修改本地用户输入和历史原文。
+2. Generate tokens with `crypto.randomBytes(24)`. Mappings stay **in memory only**, never in configuration, session custom entries, logs or model prompts. Local users can still see original values.
+   使用 `crypto.randomBytes(24)` 生成占位符。映射**仅存于内存**，不写入配置、会话自定义条目、日志或模型提示；本地用户仍可看到原文。
+3. Restore finalized assistant text, thinking and tool arguments. The TUI Markdown transformer restores complete streamed tokens; partial tokens may briefly appear. RPC/JSON deltas remain masked until final `message_end`. Altered or truncated tokens cannot be restored.
+   还原最终 assistant 文本、思考内容和工具参数。TUI 在完整占位符到达后还原，片段可能短暂显示；RPC/JSON 增量仍脱敏，直到最终消息还原。被改写或截断的占位符无法还原。
+4. Restore tool arguments before execution so legitimate local operations use original values; redact them again on subsequent requests. **Restoring credentials is not tool authorization or exfiltration prevention.**
+   工具执行前还原参数，让合法本地操作使用原值；后续请求再次脱敏。**凭证还原不等于工具授权或防外传。**
+5. Execute regex scans in a terminable worker. On failure, return `{}` and request cancellation rather than relying on hook exceptions swallowed by Pi. An empty request or provider validation error may still occur, but the handler does not return the original payload.
+   正则扫描运行于可终止 worker。失败时返回 `{}` 并请求取消，不依赖被 Pi 吞掉的钩子异常；仍可能产生空请求或提供商校验错误，但处理器不返回原始请求体。
 
-### 配置文件访问保护
+### Configuration access guard / 配置访问防护
 
-以**统一出口脱敏为主，配置直接访问拦截为辅**。不全面禁用 shell：
+**Outgoing redaction is the main defense; direct-access blocking is supplementary.** Shell is not disabled wholesale.
 
-- 在 `tool_call` 拦截明确涉及 `protecter.json` 的输入，包括常见 `read`、`write`、`edit` 和 `bash cat …`。
-- 路径参数解析 `@`、`~`、相对路径、`file://`，检查符号链接及 inode 别名。阻止 `grep/find/ls` 扫描包含配置的祖先目录。
-- 如果完整原始配置意外出现在请求文本中，也尝试整体替换。
-- **这只是尽力保护**：动态 shell、base64、分段输出、目录内部 symlink、任意第三方工具、网络发送均可绕过路径检查。不能保证恶意模型永远无法获取配置。不要把任意 shell 的能力与强隔离同时视为已实现。
+**以出站脱敏为主，直接访问拦截为辅。** 不全面禁用 shell。
 
-## 当前限制（请先读）
+- Block tool inputs explicitly mentioning `protecter.json`, including common read/write/edit and shell commands. Because all arguments are checked, merely mentioning the filename in documentation can also be blocked.
+  拦截明确提及配置文件名的工具输入，包括常见读写、编辑和 shell 命令。由于检查全部参数，在文档中仅提及文件名也可能被误拦截。
+- Resolve `@`, `~`, relative paths and `file://`; check symlink/inode aliases. Block `grep/find/ls` over ancestor directories containing the configuration.
+  解析上述路径形式，检查符号链接和 inode 别名；阻止这些搜索工具扫描包含配置的祖先目录。
+- Attempt whole-text masking if the complete original configuration accidentally appears in a request.
+  完整原始配置意外出现在请求文本时，尝试整体替换。
+- **Best effort only:** dynamic shell, base64, split output, nested symlinks, arbitrary third-party tools and network sends can bypass these checks. This cannot guarantee that a malicious model never obtains configuration.
+  **仅为尽力防护：**动态 shell、编码、拆分输出、目录内链接、任意第三方工具和网络发送可绕过检查，无法保证恶意模型永远无法取得配置。
 
-- 只保护命中规则的文本；不识别同义改写、字符拆分、任意编码。附件中无法可靠检查 SPI，因此检测到常见图片／音频／视频／文件块时拒绝整个请求；不是 OCR。
-- 为避免摘要调用的不同生命周期泄漏／残留无法恢复的占位符，暂时取消 `/compact`、自动压缩和带摘要的 `/tree`。不带摘要的树导航可用；长会话请 `/new`。
-- 映射在退出、`/reload`、会话切换时丢弃。已完成并还原的本地消息不依赖映射；崩溃前的残留占位符、旧摘要、原始 delta 无法跨重启恢复。
-- 规则过宽（例如 `.`、全部数字或常见协议词）可能改写请求协议字段、模型名、工具 schema 或 ID，导致请求失败。数值命中会转为占位符字符串。优先使用具体规则。
-- 同一占位符会暴露“值相同”的关系；文本上下文也可能推断身份。这不是形式化匿名化。
-- 请求 hook 不覆盖 HTTP headers、认证 API key、网关地址、Pi 遥测、`/share`、其他扩展自行调用 `fetch`／模型 SDK 或工具网络访问。向模型提供服务的网关仍需要收到用于认证的网关凭证。
-- **请将本插件排在其他 payload 修改扩展之后，并且只运行受信任的扩展。** 后续处理器仍可重新加入原文；其他扩展拥有本机权限，插件无法约束它们。插件加载失败时 Pi 也可能继续运行，应检查状态再输入敏感信息。
-- 本地会话、终端、导出和工具写出的文件可能包含原文；本项目不加密或清理它们。
+## Limitations — read first / 当前限制——请先阅读
 
-详细威胁模型见 [SECURITY.md](SECURITY.md)。
+- Only rule-matching text is protected, not paraphrases, split characters or arbitrary encodings. Common image/audio/video/file blocks reject the entire request because SPI cannot be reliably inspected; no OCR is provided.
+  仅保护命中规则的文本，不覆盖改写、拆字和任意编码。常见多模态附件因无法可靠审查而拒绝整个请求，不提供 OCR。
+- `/compact`, automatic compaction and summarized `/tree` navigation are cancelled pending separate lifecycle/restoration verification. Tree navigation without summaries works; use `/new` for long sessions.
+  暂时取消压缩和带摘要的树导航，等待单独验证生命周期及还原；不带摘要的导航可用，长会话请使用 `/new`。
+- Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
+  退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
+- Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
+  过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
+- Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
+  复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。
+- Hooks do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, `/share`, independent extension SDK/fetch calls or tool networking. The gateway still receives its authentication credentials.
+  钩子不覆盖认证头、API key、网关地址、遥测、分享、扩展独立网络调用和工具联网；网关仍收到其认证凭证。
+- **Load after other payload rewriters and trust every installed extension.** Later handlers can reintroduce originals. Extensions have local permissions, and Pi may continue if this extension fails to load. Check status before entering secrets.
+  **在其他请求改写扩展之后加载，并只使用可信扩展。** 后续处理器可重新加入原文；扩展有本机权限，插件加载失败时 Pi 可能继续运行，请先检查状态再输入秘密。
+- Local sessions, terminals, exports and files written by tools may contain plaintext. They are not encrypted or cleaned by this project.
+  本地会话、终端、导出和工具写出的文件可能包含明文，本项目不加密或清理它们。
 
-## 开发与验证
+See [SECURITY.md](SECURITY.md) for the threat model. / 详细威胁模型见该安全文档。
+
+## Development and verification / 开发与验证
 
 ```bash
 npm ci
 npm run check
 ```
 
-测试使用临时目录和虚构敏感值，不读取用户真实配置，不使用真实 API key 或访问 LLM 网关。包含脱敏／还原、正则超时、配置权限、路径防护及真实 Pi 扩展加载器／事件 runner 集成测试。
+Tests use temporary directories and fictional secrets, never real user configuration, API keys or LLM gateways. Coverage includes masking/restoration, regex timeout, permissions, path guards and real Pi loader/runner integration. All Markdown, comments and new commit messages must be English + Simplified Chinese.
 
-接口依据：[Pi Extensions](https://pi.dev/docs/latest/extensions)、本机 0.85.1 扩展文档及 runner 实现。项目遵循 MIT License。
+测试仅使用临时目录和虚构敏感值，不读取真实配置、不使用真实密钥或访问 LLM 网关，覆盖脱敏还原、正则超时、权限、路径防护和真实 Pi 加载器／执行器集成。所有 Markdown、注释和新提交信息必须使用英文＋简体中文。
+
+API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.85.1 documentation and runner implementation. Licensed under MIT.
+
+接口依据为 Pi 官方扩展文档、本机 0.85.1 文档及执行器实现；采用 MIT 许可证。

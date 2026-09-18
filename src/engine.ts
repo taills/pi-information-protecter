@@ -21,7 +21,10 @@ export class Protecter {
     return this.tokens.size;
   }
 
-  /** Serialise scans so two requests cannot assign different tokens to the same value. */
+  /**
+   * Serialise scans so two requests cannot assign different tokens to the same value.
+   * 串行扫描，避免两个请求为同一原文分配不同占位符。
+   */
   redact(payload: unknown): Promise<unknown> {
     const run = this.queue.then(() => this.scan(payload));
     this.queue = run.catch(() => undefined);
@@ -81,6 +84,7 @@ export class Protecter {
 
   restoreText(text: string): string {
     // One pass, never recursively expand text introduced by a replacement.
+    // 仅替换一遍，不递归展开替换后引入的文本。
     return text.replace(
       /__PIP_[a-f0-9]{48}__/g,
       (token) => this.tokens.get(token) ?? token,

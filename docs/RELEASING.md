@@ -1,48 +1,67 @@
-# 发布流程
+# Release process / 发布流程
 
-## 发布约定
+## Conventions / 发布约定
 
-- 包名：`pi-information-protecter`；npm 公共 registry；首版 `0.1.0`。
-- Git 远端：`https://github.com/taills/pi-information-protecter`。
-- 先验证、提交并推送源码，再发布相同版本的 npm 包；npm 成功后创建并推送版本标签。
-- 不覆盖已发布版本。若发现问题，修复后递增版本号再发布。
-- 发布凭证仅通过 npm 标准登录／认证机制提供，不写入仓库、命令记录或文档。
+- Package: `pi-information-protecter`; public npm registry; initial version `0.1.0`.
+  包名如上，发布至 npm 公共仓库，首版为 `0.1.0`。
+- Git remote: `https://github.com/taills/pi-information-protecter`.
+  Git 远端为上述仓库。
+- Verify, commit and push source before publishing the matching npm version. Create and push a version tag after npm publication succeeds.
+  先验证、提交和推送源码，再发布对应 npm 版本；npm 成功后创建并推送版本标签。
+- Never overwrite a published version. Increment the version for subsequent fixes.
+  不覆盖已发布版本，后续修复需递增版本号。
+- Use standard npm authentication; never store credentials in source, command records or documentation.
+  使用 npm 标准认证，不把凭证写入源码、命令记录或文档。
+- All Markdown, code comments, commit messages and annotated tag messages must be English + Simplified Chinese.
+  所有 Markdown、代码注释、提交信息和附注标签信息必须使用英文＋简体中文。
 
-## 维护者检查清单
+## Maintainer checklist / 维护者检查清单
 
-1. 核对 `git status`、分支和远端；确认不存在其他人的未处理修改。
-2. 更新 `package.json` 版本、README 兼容说明和 CHANGELOG。首次发布前补齐 repository、homepage、bugs、license。
-3. 执行 `npm ci` 和 `npm run check`。测试只使用虚构信息；真实网关端到端验证若未执行，应如实说明。
-4. 执行 `npm pack --dry-run --json`，确认包含所有 `src/` 文件（特别是 `scan-worker.mjs`）、示例、README、SECURITY、CHANGELOG 和 LICENSE，不包含真实配置、会话、日志或 node_modules。
-5. 执行 `git diff --check`，审查所有暂存文件，提交并推送 `main`。
-6. 执行 `npm whoami --registry=https://registry.npmjs.org`，确认账号；查询目标版本尚未发布。
-7. 执行发布命令：
+1. Check `git status`, the branch and remote; preserve other contributors' changes.
+   检查工作区、分支与远端，保留其他贡献者的修改。
+2. Update package version, README compatibility and CHANGELOG. For the first release, include repository, homepage, bugs and license metadata. Review bilingual completeness.
+   更新版本、兼容说明和日志，首版补齐仓库、主页、反馈和许可证元数据，并检查双语完整性。
+3. Run `npm ci` and `npm run check`. Use fictional secrets. Explicitly disclose if real-gateway end-to-end testing was not performed.
+   执行安装和检查，使用虚构敏感值；未执行真实网关端到端测试时须如实说明。
+4. Run `npm pack --dry-run --json`. Verify all source files, especially `scan-worker.mjs`, examples, README, SECURITY, CHANGELOG and LICENSE are included. Exclude real configuration, sessions, logs and node_modules.
+   预检打包清单，确认包含全部源码、worker、示例与必要文档，不包含真实配置、会话、日志和依赖目录。
+5. Run `git diff --check`, review staged files, commit with a bilingual message and push `main`.
+   检查差异，审查暂存文件，用双语提交信息提交并推送主分支。
+6. Run `npm whoami --registry=https://registry.npmjs.org` and confirm that the target version is not already published.
+   确认 npm 登录账号，并查询目标版本尚未发布。
+7. Publish with the following command. `prepublishOnly` repeats typechecking and tests. The maintainer must complete OTP/browser/permission requirements; do not bypass authentication.
+   使用以下命令发布，发布前钩子会再次运行类型检查和测试；OTP、浏览器验证或权限要求由维护者完成，不绕过认证。
 
    ```bash
    npm publish --access public --registry=https://registry.npmjs.org
    ```
 
-   `prepublishOnly` 会再次运行类型检查和测试。需要 OTP、浏览器验证或权限时由维护者完成认证，不绕过认证要求。
-
-8. 确认返回成功，并查询 registry 中的精确版本、dist-tag 及 tarball integrity：
+8. Confirm success, then query the exact version, dist-tag and tarball integrity.
+   确认成功后查询精确版本、分发标签及压缩包完整性。
 
    ```bash
    npm view pi-information-protecter@0.1.0 version dist.integrity dist.tarball --json --registry=https://registry.npmjs.org
    npm view pi-information-protecter dist-tags --json --registry=https://registry.npmjs.org
    ```
 
-9. 在相同提交上创建并推送标签：
+9. Create and push the tag on the published commit.
+   在已发布的提交上创建并推送标签。
 
    ```bash
-   git tag -a v0.1.0 -m "Release v0.1.0"
+   git tag -a v0.1.0 -m "Release v0.1.0 / 发布 v0.1.0"
    git push origin v0.1.0
    ```
 
-10. 验证工作区干净、远端提交与本地一致；发布记录应提供 commit、tag、npm 链接及验证结果。
+10. Verify a clean working tree and matching local/remote commits. Record commit, tag, npm URL and validation results in both languages.
+    验证工作区干净、本地远端提交一致，以双语记录提交、标签、npm 地址和验证结果。
 
-## 失败与中断
+## Failure handling / 失败处理
 
-- Git 推送失败：保留本地提交，解决远端／权限问题后重试，不强推。
-- npm 发布失败：保留已推送提交，明确报告失败，切勿宣称包已上线。
-- npm 返回超时：先查询目标精确版本，防止其实已经发布而重复执行。
-- npm 成功而 tag 推送失败：记录包已发布，后续补推标签；不要重发同一版本。
+- Git push failure: preserve the local commit, fix remote/permission issues and retry without force-pushing.
+  推送失败时保留本地提交，解决远端或权限问题后重试，不强推。
+- npm failure: preserve the pushed commit and report failure; never claim publication succeeded.
+  npm 失败时保留已推送提交并明确报告，不宣称已发布。
+- npm timeout: query the exact version before retrying, because publication may already have succeeded.
+  npm 超时时先查精确版本，避免实际已成功而重复发布。
+- Tag push failure after npm success: record that npm is published and retry the tag push later; do not republish the same version.
+  npm 成功但标签推送失败时记录已发布状态，后续补推标签，不重发同一版本。
