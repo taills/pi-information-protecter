@@ -1,0 +1,6 @@
+node_modules/
+coverage/
+.playwright-mcp/
+protecter.json
+*.log
+.DS_Store
