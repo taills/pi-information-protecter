@@ -99,6 +99,15 @@ jobs:
       - name: Verify registry version / 验证 registry 版本
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          npm view "pi-information-protecter@$VERSION" \
-            version dist.integrity dist.tarball --json \
-            --registry=https://registry.npmjs.org
+          # npm may process accepted publishes asynchronously. / npm 可能异步处理。
+          for attempt in $(seq 1 18); do
+            if npm view "pi-information-protecter@$VERSION" \
+              version dist.integrity dist.tarball --json \
+              --prefer-online --registry=https://registry.npmjs.org; then
+              exit 0
+            fi
+            echo "Waiting for registry / 等待 registry: $attempt/18"
+            sleep 10
+          done
+          echo "Verify later; do not republish / 请稍后验证，不要重复发布"
+          exit 1
