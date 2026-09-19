@@ -24,9 +24,15 @@ export class Protecter {
     if (this.closed) throw new Error(REQUEST_ERROR);
     this.snapshot = snapshot;
   }
-  get configPath(): string { return this.snapshot?.path ?? ""; }
-  get ruleCount(): number { return this.snapshot?.config.sensitiveWords.length ?? 0; }
-  get ready(): boolean { return !!this.snapshot && !this.closed; }
+  get configPath(): string {
+    return this.snapshot?.path ?? "";
+  }
+  get ruleCount(): number {
+    return this.snapshot?.config.sensitiveWords.length ?? 0;
+  }
+  get ready(): boolean {
+    return !!this.snapshot && !this.closed;
+  }
   get mappingCount(): number {
     return this.tokens.size;
   }

@@ -1,4 +1,6 @@
 node_modules/
+dist/
+*.tgz
 coverage/
 .playwright-mcp/
 protecter.json

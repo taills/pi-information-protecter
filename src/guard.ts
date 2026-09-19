@@ -50,7 +50,13 @@ export function blocksConfigAccess(
   // Inspect executable fields, not document bodies. / 检查可执行字段，不检查文档正文。
   if (["bash", "powershell"].includes(tool)) {
     const command = typeof input.command === "string" ? input.command : "";
-    if (/protecter(?:\.[a-f0-9]{32})?\.json|\.protecter-migration/i.test(command) || command.includes(configPath)) return true;
+    if (
+      /protecter(?:\.[a-f0-9]{32})?\.json|\.protecter-migration/i.test(
+        command,
+      ) ||
+      command.includes(configPath)
+    )
+      return true;
   }
   const candidate = input.path ?? input.file_path ?? input.filePath;
   const recursive = ["grep", "find", "ls"].includes(tool);
@@ -62,7 +68,9 @@ export function blocksConfigAccess(
     );
     const real = canonical(path);
     return (
-      (dirname(real) === dirname(target) && (CONFIG_NAME.test(basename(real)) || basename(real).startsWith(".protecter-migration"))) ||
+      (dirname(real) === dirname(target) &&
+        (CONFIG_NAME.test(basename(real)) ||
+          basename(real).startsWith(".protecter-migration"))) ||
       real === target ||
       sameFile(path, configPath) ||
       (recursive && contains(real, target))

@@ -30,7 +30,11 @@ async function fixture(
   save(words);
   await engine.initialize();
   const activePath = engine.configPath;
-  const saveActive = (rules: Rule[]) => writeFileSync(activePath, JSON.stringify({ version: 1, sensitiveWords: rules }));
+  const saveActive = (rules: Rule[]) =>
+    writeFileSync(
+      activePath,
+      JSON.stringify({ version: 1, sensitiveWords: rules }),
+    );
   t.after(() => {
     engine.close();
     rmSync(dir, { recursive: true, force: true });
@@ -266,7 +270,15 @@ test("path guard handles relative, @, file URL, symlink, hardlink, parents and s
     blocksConfigAccess("read", { path: "src/app.ts" }, dir, path),
     false,
   );
-  assert.equal(blocksConfigAccess("write", { path: "README.md", content: `protecter.json ${path}` }, dir, path), false);
+  assert.equal(
+    blocksConfigAccess(
+      "write",
+      { path: "README.md", content: `protecter.json ${path}` },
+      dir,
+      path,
+    ),
+    false,
+  );
   assert.equal(
     blocksConfigAccess("bash", { command: "npm test" }, dir, path),
     false,

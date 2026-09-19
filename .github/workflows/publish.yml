@@ -61,8 +61,11 @@ jobs:
           NODE
       - name: Install locked dependencies / 安装锁定依赖
         run: npm ci
-      - name: Typecheck and test / 类型检查与测试
+      # check triggers pretest build and packed-artifact tests.
+      # check 触发测试前构建及真实压缩包测试。
+      - name: Build and validate package / 构建并验证发布包
         run: npm run check
+      # prepack rebuilds dist without publishing source. / 打包前重新构建 dist。
       - name: Inspect package contents / 检查发布包内容
         run: npm pack --dry-run
 

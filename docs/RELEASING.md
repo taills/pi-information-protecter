@@ -29,9 +29,9 @@ GitHub 的 `npm` 环境仅允许 `v*` 标签部署。验证任务没有 OIDC 权
 
 ## Validate without publishing / 不发布的验证
 
-From the repository's Actions tab, choose **Publish to npm / 发布到 npm**, select `main`, and run with `dry_run=true` (the default). It installs locked dependencies, typechecks, tests and inspects the package. The publish job is skipped; this does not prove npm OIDC authentication works.
+From the repository's Actions tab, choose **Publish to npm / 发布到 npm**, select `main`, and run with `dry_run=true` (the default). It installs locked dependencies, typechecks, builds minified `dist/`, tests source and tarball loading, and inspects the package. The publish job is skipped; this does not prove npm OIDC authentication works.
 
-在仓库 Actions 页面选择发布工作流，选取 `main`，使用默认的 `dry_run=true` 执行。流程安装锁定依赖、类型检查、测试并检查包内容；跳过发布任务，因此不能证明 npm OIDC 认证可用。
+在仓库 Actions 页面选择发布工作流，选取 `main`，使用默认的 `dry_run=true` 执行。流程安装锁定依赖、类型检查、构建压缩后的 `dist/`、测试源码和压缩包加载并检查包内容；跳过发布任务，因此不能证明 npm OIDC 认证可用。
 
 ```bash
 gh workflow run publish.yml --ref main -f dry_run=true
@@ -63,8 +63,8 @@ gh workflow run publish.yml --ref main -f dry_run=true
    git push origin v0.1.1
    ```
 
-4. **The tag push triggers npm publication automatically.** The workflow rejects tags that do not exactly match `package.json`. Only stable `X.Y.Z` releases are supported; prereleases need a separate dist-tag policy before enabling them. It runs `npm publish --access public --provenance`; `prepublishOnly` repeats validation. Publishing jobs are serialized and never cancelled by a newer release.
-   **推送标签会自动触发 npm 发布。** 标签必须精确匹配包版本，目前仅支持稳定版 `X.Y.Z`；预发布版本需先增加分发标签策略。流程公开发布并附来源证明，发布前再次验证；发布任务串行执行，不被后续发布取消。
+4. **The tag push triggers npm publication automatically.** The workflow rejects tags that do not exactly match `package.json`. Only stable `X.Y.Z` releases are supported; prereleases need a separate dist-tag policy before enabling them. It runs `npm publish --access public --provenance`; `prepublishOnly` repeats validation and `prepack` regenerates `dist/`. Publish only the three built `.mjs` files plus the allowed documentation, example and license; never `src/`, tests, build scripts or source maps. Publishing jobs are serialized and never cancelled by a newer release.
+   **推送标签会自动触发 npm 发布。** 标签必须精确匹配包版本，目前仅支持稳定版 `X.Y.Z`；预发布版本需先增加分发标签策略。流程公开发布并附来源证明，发布前再次验证且打包前重新生成 `dist/`；仅发布三个构建后的 `.mjs` 文件及白名单文档、示例和许可证，不发布源码、测试、构建脚本或映射文件；发布任务串行执行，不被后续发布取消。
 5. Verify the Actions run, exact registry version, `latest` and provenance. Record commit, tag, npm URL and results in both languages. Do not claim success based only on a tag push.
    验证 Actions 结果、registry 精确版本、最新标签和来源证明，以双语记录提交、标签、npm 地址和结果，不能仅凭标签已推送就宣称成功。
 

@@ -1,6 +1,6 @@
 {
   "name": "pi-information-protecter",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Sensitive Personal Information (SPI) Protecter — local reversible privacy redaction for Pi",
   "type": "module",
   "license": "MIT",
@@ -23,7 +23,7 @@
     "redaction"
   ],
   "files": [
-    "src",
+    "dist",
     "README.md",
     "SECURITY.md",
     "CHANGELOG.md",
@@ -33,7 +33,7 @@
   ],
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.mjs"
     ]
   },
   "engines": {
@@ -45,13 +45,17 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.85.1",
     "@types/node": "^22.0.0",
+    "esbuild": "0.28.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   },
   "scripts": {
+    "build": "node scripts/build.mjs",
+    "pretest": "npm run build",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck && npm test",
-    "prepublishOnly": "npm run check"
+    "prepublishOnly": "npm run check",
+    "prepack": "npm run build"
   }
 }

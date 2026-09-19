@@ -1,5 +1,14 @@
 # Changelog / 更新日志
 
+## 0.2.1 — Compiled distribution / 编译产物发布
+
+- Publish compiled, bundled and minified ESM in `dist/`, including both workers; exclude source and source maps from npm packages.
+  发布 `dist/` 中编译合并压缩后的 ESM 及两个 worker，npm 包不再包含源码或 source map。
+- Build automatically before tests and packing; validate the actual tarball through Pi's loader and worker execution.
+  测试及打包前自动构建，使用 Pi 加载器和 worker 执行验证真实压缩包。
+- Separate README into full English and Simplified Chinese sections with top language links.
+  README 改为完整英文在前、简体中文在后，顶部提供语言跳转链接。
+
 ## 0.2.0 — Machine configuration and memory cache / 机器配置与内存缓存
 
 - Derive deterministic filenames from OS machine identifiers using a product-specific hash; never fall back to random IDs.
@@ -12,7 +21,6 @@
   重载命令调用 Pi 重载，文件工具改为检查目标路径而非文档正文。
 - Add migration, failure-injection, concurrency and cache regression tests, plus bilingual migration documentation.
   增加迁移、故障注入、并发及缓存回归测试和双语迁移文档。
-
 
 - Add tag-triggered GitHub Actions npm OIDC publishing, scoped environment permissions and manual dry-run validation.
   增加标签触发的 GitHub Actions npm OIDC 发布、限定环境权限及手动试运行验证。

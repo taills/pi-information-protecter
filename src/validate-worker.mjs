@@ -3,7 +3,12 @@ import { parentPort, workerData } from "node:worker_threads";
 try {
   for (const config of workerData) {
     for (const rule of config.sensitiveWords) {
-      if (typeof rule === "object" && rule.type === "regex" && new RegExp(rule.pattern, rule.flags ?? "").test("")) throw new Error();
+      if (
+        typeof rule === "object" &&
+        rule.type === "regex" &&
+        new RegExp(rule.pattern, rule.flags ?? "").test("")
+      )
+        throw new Error();
     }
   }
   parentPort.postMessage(true);
