@@ -20,6 +20,10 @@ Current-target rules come first, then old files in filename order. Strings and e
 
 当前目标规则优先，旧文件按名称顺序合并。字符串和等价字面对象按精确值去重；正则按模式和含隐式 `g` 的规范化标志去重。大小写、空白、Unicode 和不同正则语义保留。合并并格式化后仍须满足 1000 条及 1 MiB 限制，不允许截断。
 
+Fixed `replacement` values are part of rule identity. The same matcher with different targets (including fixed versus random) is a conflict, not an override. Merged targets are checked together in the bounded worker before any write or deletion; unsafe or ambiguous aliases stop migration. Old plugin versions reject this optional field, so upgrade before editing configuration.
+
+固定 `replacement` 是规则身份的一部分。相同匹配器具有不同目标（包括固定与随机）视为冲突，而非覆盖。合并后的目标会在限时 worker 中联合检查，通过后才写入或删除；不安全或歧义别名会停止迁移。旧插件版本拒绝该字段，需先升级再修改配置。
+
 ## Commit and cleanup / 提交与清理
 
 1. Acquire the directory-wide `.protecter-migration.lock` using exclusive directory creation; wait up to 5 seconds for cooperating processes.

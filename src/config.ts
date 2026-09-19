@@ -12,8 +12,8 @@ import { dirname } from "node:path";
 
 export type Rule =
   | string
-  | { type: "literal"; value: string }
-  | { type: "regex"; pattern: string; flags?: string };
+  | { type: "literal"; value: string; replacement?: string }
+  | { type: "regex"; pattern: string; flags?: string; replacement?: string };
 export interface Config {
   version: 1;
   sensitiveWords: Rule[];
@@ -33,15 +33,30 @@ export function parseConfig(raw: string): Config {
       Object.keys(value).some((k) => !["version", "sensitiveWords"].includes(k))
     )
       throw new Error();
+    const definitions = new Map<string, string | undefined>();
     for (const rule of value.sensitiveWords) {
       if (typeof rule === "string") {
         if (!rule || rule.length > 8192) throw new Error();
+        const key = JSON.stringify(["literal", rule]);
+        if (definitions.has(key) && definitions.get(key) !== undefined)
+          throw new Error();
+        definitions.set(key, undefined);
         continue;
       }
       if (!rule || typeof rule !== "object") throw new Error();
+      if (
+        Object.hasOwn(rule, "replacement") &&
+        (typeof rule.replacement !== "string" ||
+          !rule.replacement.trim() ||
+          rule.replacement.length > 8192 ||
+          rule.replacement.includes("__PIP_"))
+      )
+        throw new Error();
       if (rule.type === "literal") {
         if (
-          Object.keys(rule).some((k) => !["type", "value"].includes(k)) ||
+          Object.keys(rule).some(
+            (k) => !["type", "value", "replacement"].includes(k),
+          ) ||
           typeof rule.value !== "string" ||
           !rule.value ||
           rule.value.length > 8192
@@ -50,7 +65,7 @@ export function parseConfig(raw: string): Config {
       } else if (rule.type === "regex") {
         if (
           Object.keys(rule).some(
-            (k) => !["type", "pattern", "flags"].includes(k),
+            (k) => !["type", "pattern", "flags", "replacement"].includes(k),
           ) ||
           typeof rule.pattern !== "string" ||
           !rule.pattern ||
@@ -63,6 +78,17 @@ export function parseConfig(raw: string): Config {
         // Compilation only here; matching is bounded in the worker. / 此处仅编译，匹配在限时 worker 内执行。
         void re;
       } else throw new Error();
+      const key =
+        rule.type === "literal"
+          ? JSON.stringify(["literal", rule.value])
+          : JSON.stringify([
+              "regex",
+              rule.pattern,
+              [...new Set((rule.flags ?? "") + "g")].sort().join(""),
+            ]);
+      if (definitions.has(key) && definitions.get(key) !== rule.replacement)
+        throw new Error();
+      definitions.set(key, rule.replacement);
     }
     return value;
   } catch {

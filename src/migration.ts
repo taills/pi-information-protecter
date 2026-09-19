@@ -69,13 +69,14 @@ export function mergeConfigs(configs: Config[]): Config {
     for (const rule of config.sensitiveWords) {
       const key =
         typeof rule === "string"
-          ? JSON.stringify(["literal", rule])
+          ? JSON.stringify(["literal", rule, null])
           : rule.type === "literal"
-            ? JSON.stringify(["literal", rule.value])
+            ? JSON.stringify(["literal", rule.value, rule.replacement ?? null])
             : JSON.stringify([
                 "regex",
                 rule.pattern,
                 [...new Set((rule.flags ?? "") + "g")].sort().join(""),
+                rule.replacement ?? null,
               ]);
       if (!seen.has(key)) {
         seen.add(key);
@@ -170,9 +171,7 @@ export async function migrateConfig(
     const config = mergeConfigs(
       sources.length ? sources.map((s) => s.config) : [DEFAULT_CONFIG],
     );
-    await validatePatterns(
-      sources.length ? sources.map((s) => s.config) : [config],
-    );
+    await validatePatterns([config]);
     if (sources.length === 1 && sources[0].name === targetName) {
       unchanged(dir, sources[0]);
       if (JSON.stringify(names(dir)) !== JSON.stringify(discovered))

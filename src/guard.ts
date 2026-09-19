@@ -68,13 +68,17 @@ export function blocksConfigAccess(
     );
     const real = canonical(path);
     const auditName = /^protecter\.[a-f0-9]{32}\.jsonl(?:\.lock)?$/;
-    const auditAlias = readdirSync(dirname(target)).filter(name => auditName.test(name)).some(name => sameFile(path, resolve(dirname(target), name)));
+    const auditAlias = readdirSync(dirname(target))
+      .filter((name) => auditName.test(name))
+      .some((name) => sameFile(path, resolve(dirname(target), name)));
     return (
       (dirname(real) === dirname(target) &&
-        (CONFIG_NAME.test(basename(real)) || auditName.test(basename(real)) ||
+        (CONFIG_NAME.test(basename(real)) ||
+          auditName.test(basename(real)) ||
           basename(real).startsWith(".protecter-migration"))) ||
       real === target ||
-      sameFile(path, configPath) || auditAlias ||
+      sameFile(path, configPath) ||
+      auditAlias ||
       (recursive && contains(real, target))
     );
   } catch {

@@ -14,7 +14,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 
 ```bash
 # Install the pinned npm release.
-pi install npm:pi-information-protecter@0.3.0
+pi install npm:pi-information-protecter@0.4.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -62,6 +62,29 @@ More examples are in [`protecter.example.json`](protecter.example.json); they ar
 - Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
 - `/protecter` opens the local audit viewer; `/protecter logs 50` shows up to 50 recent records. `/protecter status` reports memory counts without reading configuration. `/protecter reload` invokes Pi's full reload after idle. Do not enter secrets as command arguments.
 - Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
+
+### Fixed replacement values
+
+Object rules accept an optional `replacement`. Omit it for the existing random behavior; strings still always use random placeholders. Empty, whitespace-only, non-string or over-8192-character targets are invalid (not a random fallback).
+
+```json
+{
+  "version": 1,
+  "sensitiveWords": [
+    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
+    { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
+    { "type": "literal", "value": "randomly-protected-value" }
+  ]
+}
+```
+
+Targets are literal text, not replacement templates: `$1` and `$&` are not expanded. Both literal and regex object rules support this field. Fixed aliases appear in audit records and are restored locally in replies and tool arguments after a successful scan. They are **reserved aliases**: naturally occurring identical response text will also be restored; choose distinctive targets and avoid ordinary words when that ambiguity matters. Fixed aliases expose more semantic information than random tokens.
+
+For reversible protection, duplicate targets across different rules, substring-overlapping targets, targets containing configured sensitive values, reserved `__PIP_` names and conflicting definitions are rejected. A fixed regex can represent only one distinct matched original per instance; a second distinct original rejects the request. Partially overlapping matches involving fixed rules also reject rather than silently choose a rule or expose a suffix. Pure random-rule overlaps still merge. Migration preserves targets and refuses conflicting merges without deleting originals. Reload after editing; older plugin versions do not support this field.
+
+### Multi-turn consistency and prompt caching
+
+Random placeholders are generated once per exact original and reused within the same extension instance, including after local response restoration. Starting another scan worker does not reset the mapping. This supports stable prompt prefixes but does not guarantee provider KV-cache hits; model, tools, message ordering, cache lifetime and routing also matter. `/reload`, process restart and session-instance replacement clear mappings. Different processes do not share mappings, and audit timestamps/request IDs are never included in the model payload.
 
 ## Private audit log
 
@@ -140,7 +163,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ```bash
 # 安装固定 npm 版本。
-pi install npm:pi-information-protecter@0.3.0
+pi install npm:pi-information-protecter@0.4.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -188,6 +211,29 @@ pi -e ./src/index.ts
 - 已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
 - `/protecter` 打开本地审计查看器，`/protecter logs 50` 查看最近最多 50 条；`/protecter status` 只报告内存数量，不读取配置。`/protecter reload` 等待空闲后完整重载。不要在命令参数中填写秘密。
 - 限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
+
+### 固定替换值
+
+对象规则支持可选 `replacement` 字段。省略时保持随机替换，纯字符串规则始终使用随机占位符。空字符串、全空白、非字符串或超过 8192 字符的目标属于无效配置，不回退为随机。
+
+```json
+{
+  "version": 1,
+  "sensitiveWords": [
+    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
+    { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
+    { "type": "literal", "value": "randomly-protected-value" }
+  ]
+}
+```
+
+目标按字面文本处理，不是替换模板，`$1`、`$&` 不展开。字面和正则对象均支持该字段。成功扫描后，固定别名同样写入审计，并在本地回复和工具参数中还原。它属于**保留别名**：回复中自然出现的相同文本也会被还原；如果介意此歧义，请选择独特目标而非普通词。固定别名比随机占位符暴露更多语义信息。
+
+为保持可逆保护，不同规则复用相同目标、目标互为子串、目标包含配置敏感值、使用保留 `__PIP_` 名称或定义冲突时拒绝加载。固定正则在同一实例中只能表示一种不同的匹配原文，第二种原文会导致请求被拒绝。涉及固定规则的部分重叠匹配也拒绝，不静默选择规则或泄漏后缀；纯随机规则重叠仍合并。迁移保留固定目标，遇到冲突停止且不删除原文件。修改后请重载；旧插件版本不支持此字段。
+
+### 多轮一致性与提示词缓存
+
+随机占位符按精确原文首次生成，在同一扩展实例内持续复用，包括本地回复还原后的再次脱敏；新建扫描 worker 不会重置映射。这有助于前缀稳定，但不保证提供商 KV Cache 命中，模型、工具、消息顺序、缓存有效期和路由也有影响。重载、进程重启和会话实例替换会清除映射；不同进程不共享映射，审计时间和请求 ID 不进入模型请求体。
 
 ## 私有审计日志
 

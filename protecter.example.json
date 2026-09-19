@@ -2,6 +2,8 @@
   "version": 1,
   "sensitiveWords": [
     "张三",
+    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
+    { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
     { "type": "literal", "value": "replace-with-your-real-password" },
     { "type": "regex", "pattern": "https?://[^\\s\\\"<>]+", "flags": "i" },
     { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" },

@@ -40,6 +40,12 @@ Prevent configured personal information from accidentally entering Pi LLM reques
 - Compaction and tree summaries are conservatively disabled. Do not widen Pi compatibility without verification.
   保守禁用压缩和树摘要，未经验证不扩大 Pi 兼容范围。
 
+## Fixed aliases and caching / 固定别名与缓存
+
+Fixed targets are reserved literal aliases, not anonymization: they reveal semantics and natural occurrences in model output are also restored after the mapping is learned. Choose distinctive values. Reusing one alias for distinct originals, sensitive targets, ambiguous substring aliases and conflicting matchers is rejected rather than guessing a reverse mapping. Runtime regex collisions and partial fixed-rule overlaps fail closed. Random placeholders remain stable within one extension instance; cache hits still depend on provider prefix, model and routing policies. Reload/restart discards mappings; audit records are not loaded to restore them.
+
+固定目标是保留字面别名，并非匿名化；它会暴露语义，映射学习后模型输出中自然出现的同名内容也会被还原，应选择独特值。不同原文复用别名、敏感目标、子串歧义和匹配器冲突会被拒绝，不猜测反向映射。运行时正则冲突及固定规则部分重叠会拒绝请求。随机占位符在同一实例内保持稳定，但缓存命中仍依赖提供商前缀、模型和路由策略。重载或重启丢弃映射，不从审计恢复。
+
 ## Deployment guidance / 安全部署建议
 
 1. Configure precise rules locally and check status/counts. Empty rules provide no SPI detection.

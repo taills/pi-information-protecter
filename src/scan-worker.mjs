@@ -13,8 +13,10 @@ try {
   const hitTokens = new Set();
   const matchers = rules.map((rule) => {
     if (typeof rule === "string") return { literal: rule };
-    if (rule.type === "literal") return { literal: rule.value };
+    if (rule.type === "literal")
+      return { literal: rule.value, replacement: rule.replacement };
     return {
+      replacement: rule.replacement,
       regex: new RegExp(
         rule.pattern,
         [...new Set((rule.flags ?? "") + "g")].join(""),
@@ -38,9 +40,25 @@ try {
   const payloadText = JSON.stringify(payload);
   let matches = 0;
   let nodes = 0;
-  function tokenFor(original) {
+  function tokenFor(original, replacement) {
     let token = originalToToken.get(original);
-    if (token) return token;
+    if (token) {
+      if (replacement !== undefined && token !== replacement) throw new Error();
+      return token;
+    }
+    if (replacement !== undefined) {
+      if (tokenToOriginal.size >= 50000) throw new Error();
+      if (
+        tokenToOriginal.has(replacement) &&
+        tokenToOriginal.get(replacement) !== original
+      )
+        throw new Error();
+      if (replacement.includes(original)) throw new Error();
+      originalToToken.set(original, replacement);
+      tokenToOriginal.set(replacement, original);
+      additions.push([replacement, original]);
+      return replacement;
+    }
     if (tokenToOriginal.size >= 50000) throw new Error();
     do {
       token = `__PIP_${randomBytes(24).toString("hex")}__`;
@@ -57,14 +75,22 @@ try {
         matcher.regex.lastIndex = 0;
         for (const match of text.matchAll(matcher.regex)) {
           if (!match[0].length) throw new Error();
-          spans.push([match.index, match.index + match[0].length]);
+          spans.push([
+            match.index,
+            match.index + match[0].length,
+            matcher.replacement,
+          ]);
           if (++matches > 100000) throw new Error();
         }
       } else {
         if (!matcher.literal) continue;
         let start = 0;
         while ((start = text.indexOf(matcher.literal, start)) !== -1) {
-          spans.push([start, start + matcher.literal.length]);
+          spans.push([
+            start,
+            start + matcher.literal.length,
+            matcher.replacement,
+          ]);
           if (++matches > 100000) throw new Error();
           start++; // Include overlapping occurrences. / 包含重叠匹配。
         }
@@ -74,13 +100,25 @@ try {
     const merged = [];
     for (const span of spans) {
       const prev = merged.at(-1);
-      if (prev && span[0] < prev[1]) prev[1] = Math.max(prev[1], span[1]);
-      else merged.push([...span]);
+      if (prev && span[0] < prev[1]) {
+        if (prev[2] !== undefined || span[2] !== undefined) {
+          if (
+            prev[0] !== span[0] ||
+            prev[1] !== span[1] ||
+            (prev[2] !== undefined &&
+              span[2] !== undefined &&
+              prev[2] !== span[2])
+          )
+            throw new Error();
+          prev[2] ??= span[2];
+        }
+        prev[1] = Math.max(prev[1], span[1]);
+      } else merged.push([...span]);
     }
     let result = "",
       cursor = 0;
-    for (const [start, end] of merged) {
-      const token = tokenFor(text.slice(start, end));
+    for (const [start, end, replacement] of merged) {
+      const token = tokenFor(text.slice(start, end), replacement);
       hitTokens.add(token);
       result += text.slice(cursor, start) + token;
       cursor = end;
@@ -92,7 +130,39 @@ try {
     // 仅豁免本实例生成的占位符，不豁免具有相似前缀的任意字符串。
     let result = "",
       cursor = 0;
-    for (const match of text.matchAll(/__PIP_[a-f0-9]{48}__/g)) {
+    const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const fixedTokens = [...tokenToOriginal.keys()].filter(
+      (token) => !/^__PIP_[a-f0-9]{48}__$/.test(token),
+    );
+    const pattern = new RegExp(
+      [
+        "__PIP_[a-f0-9]{48}__",
+        ...fixedTokens.sort((a, b) => b.length - a.length).map(escape),
+      ].join("|"),
+      "g",
+    );
+    const protectedSpans = [...text.matchAll(pattern)].filter((match) =>
+      tokenToOriginal.has(match[0]),
+    );
+    // Reject regex matches crossing a fixed alias; splitting must not hide secrets.
+    // 拒绝跨固定别名的正则匹配，避免文本切分隐藏敏感值。
+    for (const matcher of matchers) {
+      if (!matcher.regex || !fixedTokens.length) continue;
+      matcher.regex.lastIndex = 0;
+      for (const hit of text.matchAll(matcher.regex)) {
+        if (++matches > 100000 || !hit[0].length) throw new Error();
+        if (
+          protectedSpans.some(
+            (span) =>
+              fixedTokens.includes(span[0]) &&
+              hit.index < span.index + span[0].length &&
+              hit.index + hit[0].length > span.index,
+          )
+        )
+          throw new Error();
+      }
+    }
+    for (const match of protectedSpans) {
       if (!tokenToOriginal.has(match[0])) continue;
       result += redactPlain(text.slice(cursor, match.index)) + match[0];
       cursor = match.index + match[0].length;
@@ -160,8 +230,32 @@ try {
     throw new Error();
   }
   const redacted = walk(payload);
-  const finalText = JSON.stringify(redacted);
-  const hits = [...hitTokens].filter(token => finalText.includes(token)).map(token => [token, tokenToOriginal.get(token)]);
+  function containsToken(value, token, depth = 0) {
+    if (depth > 80) throw new Error();
+    if (typeof value === "string") {
+      if (value.includes(token)) return true;
+      let parsed;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return false;
+      }
+      return parsed && typeof parsed === "object"
+        ? containsToken(parsed, token, depth + 1)
+        : false;
+    }
+    if (Array.isArray(value))
+      return value.some((item) => containsToken(item, token, depth + 1));
+    if (value && typeof value === "object")
+      return Object.entries(value).some(
+        ([key, item]) =>
+          key.includes(token) || containsToken(item, token, depth + 1),
+      );
+    return false;
+  }
+  const hits = [...hitTokens]
+    .filter((token) => containsToken(redacted, token))
+    .map((token) => [token, tokenToOriginal.get(token)]);
   parentPort.postMessage({ payload: redacted, additions, hits });
 } catch {
   // Never serialize an exception, original payload or configuration back into diagnostics.

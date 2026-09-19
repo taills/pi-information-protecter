@@ -98,9 +98,15 @@ for (const mode of ["source", "packed"] as const) {
     let injected = 0;
     runner.bindCore(
       {
-        sendMessage() { injected++; },
-        sendUserMessage() { injected++; },
-        appendEntry() { injected++; },
+        sendMessage() {
+          injected++;
+        },
+        sendUserMessage() {
+          injected++;
+        },
+        appendEntry() {
+          injected++;
+        },
         setSessionName() {},
         getSessionName: () => undefined,
         setLabel() {},
@@ -114,7 +120,7 @@ for (const mode of ["source", "packed"] as const) {
         setThinkingLevel() {},
       },
       {
-        getModel: () => ({ provider: "fixture-provider" } as never),
+        getModel: () => ({ provider: "fixture-provider" }) as never,
         getScopedModels: () => [],
         isIdle: () => true,
         isProjectTrusted: () => true,
@@ -131,7 +137,17 @@ for (const mode of ["source", "packed"] as const) {
     );
     writeFileSync(
       join(dir, "protecter.json"),
-      JSON.stringify({ version: 1, sensitiveWords: ["fake-private-password"] }),
+      JSON.stringify({
+        version: 1,
+        sensitiveWords: [
+          "fake-private-password",
+          {
+            type: "literal",
+            value: "Apple Inc.",
+            replacement: "Alphabet Inc.",
+          },
+        ],
+      }),
     );
     await runner.emit({ type: "session_start", reason: "startup" });
     t.after(async () => {
@@ -156,20 +172,51 @@ for (const mode of ["source", "packed"] as const) {
     const command = runner.getCommand("protecter")!;
     const commandCtx = runner.createCommandContext();
     const previews: string[] = [];
-    const localCtx = { ...commandCtx, mode: "tui" as const, ui: { ...commandCtx.ui,
-      select: async (_title: string, options: string[]) => options[0],
-      confirm: async () => true,
-      editor: async (_title: string, text?: string) => { previews.push(text ?? ""); return undefined; },
-    } };
+    const localCtx = {
+      ...commandCtx,
+      mode: "tui" as const,
+      ui: {
+        ...commandCtx.ui,
+        select: async (_title: string, options: string[]) => options[0],
+        confirm: async () => true,
+        editor: async (_title: string, text?: string) => {
+          previews.push(text ?? "");
+          return undefined;
+        },
+      },
+    };
     await command.handler("", localCtx);
     assert.ok(previews[0].includes("fake-private-password"));
     await command.handler("logs", { ...localCtx, mode: "rpc" });
     assert.equal(previews.length, 1);
-    await command.handler("logs", { ...localCtx, ui: { ...localCtx.ui, confirm: async () => false } });
+    await command.handler("logs", {
+      ...localCtx,
+      ui: { ...localCtx.ui, confirm: async () => false },
+    });
     assert.equal(previews.length, 1);
     assert.equal(injected, 0);
     assert.match(token, /^__PIP_[a-f0-9]{48}__$/);
     assert.ok(!JSON.stringify(outgoing).includes("fake-private-password"));
+    const fixed = (await runner.emitBeforeProviderRequest({
+      text: "Apple Inc.",
+    })) as { text: string };
+    assert.equal(fixed.text, "Alphabet Inc.");
+    assert.equal(
+      runner.getMarkdownTransformers()[0](fixed.text, {
+        messageType: "assistant",
+        isStreaming: false,
+        availableWidth: 80,
+      }),
+      "Apple Inc.",
+    );
+    const fixedCall = {
+      type: "tool_call" as const,
+      toolName: "write",
+      toolCallId: "fixed",
+      input: { path: "safe.txt", content: fixed.text },
+    };
+    assert.equal(await runner.emitToolCall(fixedCall), undefined);
+    assert.equal(fixedCall.input.content, "Apple Inc.");
     const original = {
       role: "assistant" as const,
       api: "openai-completions" as const,
@@ -278,7 +325,10 @@ for (const mode of ["source", "packed"] as const) {
     );
     rmSync(auditPath);
     mkdirSync(auditPath);
-    assert.deepEqual(await runner.emitBeforeProviderRequest({ text: "fake-private-password" }), {});
+    assert.deepEqual(
+      await runner.emitBeforeProviderRequest({ text: "fake-private-password" }),
+      {},
+    );
     writeFileSync(path, "invalid-secret-config");
     await runner.emit({ type: "session_start", reason: "reload" });
     assert.deepEqual(

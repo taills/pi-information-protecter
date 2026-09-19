@@ -1,5 +1,16 @@
 # Changelog / 更新日志
 
+## 0.4.0 — Fixed replacement aliases / 固定替换别名
+
+- Add optional literal `replacement` strings to literal and regex rules; omitted targets retain stable per-instance random placeholders.
+  字面与正则规则支持可选固定 `replacement` 字符串，省略时保持实例内稳定随机占位符。
+- Restore fixed aliases locally in responses and tool arguments, and record the actual target in private audit logs, including JSON-escaped values.
+  在本地响应和工具参数中还原固定别名，审计记录实际替换目标，支持 JSON 转义值。
+- Reject invalid or sensitive targets, conflicting definitions, ambiguous inverse mappings and partial overlaps involving fixed rules; preserve targets during safe migration.
+  拒绝非法或含敏感值的目标、冲突定义、歧义反向映射及固定规则部分重叠，安全迁移保留目标。
+- Add fixed/random coexistence, multi-turn consistency and packed-distribution regressions; document reserved-alias and prompt-cache boundaries.
+  增加固定与随机共存、多轮一致性和实际发布包回归，说明保留别名及提示词缓存边界。
+
 ## 0.3.0 — Private redaction audit / 私有脱敏审计
 
 - Persist successful distinct original/token pairs per request in `protecter.<machineHash>.jsonl`, with local timestamp, UTC offset, provider ID and request ID. This intentionally adds plaintext sensitive data on disk; records represent local redaction, not confirmed network delivery.

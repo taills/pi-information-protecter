@@ -28,7 +28,9 @@ export class Protecter {
   get configPath(): string {
     return this.snapshot?.path ?? "";
   }
-  get auditPath(): string { return this.configPath ? this.configPath.replace(/\.json$/, ".jsonl") : ""; }
+  get auditPath(): string {
+    return this.configPath ? this.configPath.replace(/\.json$/, ".jsonl") : "";
+  }
   auditRecords(limit = 20) {
     if (!this.ready) throw new Error(REQUEST_ERROR);
     return readAudit(this.auditPath, limit);
@@ -65,7 +67,11 @@ export class Protecter {
     } catch {
       throw new Error(REQUEST_ERROR);
     }
-    const result = await new Promise<{ payload: unknown; additions: [string, string][]; hits: [string, string][] }>((resolve, reject) => {
+    const result = await new Promise<{
+      payload: unknown;
+      additions: [string, string][];
+      hits: [string, string][];
+    }>((resolve, reject) => {
       let settled = false;
       const worker = new Worker(
         fileURLToPath(new URL("./scan-worker.mjs", import.meta.url)),
@@ -105,17 +111,27 @@ export class Protecter {
     if (this.closed) throw new Error(REQUEST_ERROR);
     await appendAudit(this.auditPath, provider, result.hits);
     if (this.closed) throw new Error(REQUEST_ERROR);
-    for (const [token, original] of result.additions) this.tokens.set(token, original);
+    for (const [token, original] of result.additions)
+      this.tokens.set(token, original);
     return result.payload;
   }
 
   restoreText(text: string): string {
     // One pass, never recursively expand text introduced by a replacement.
     // 仅替换一遍，不递归展开替换后引入的文本。
-    return text.replace(
-      /__PIP_[a-f0-9]{48}__/g,
-      (token) => this.tokens.get(token) ?? token,
+    const escape = (value: string) =>
+      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const fixed = [...this.tokens.keys()].filter(
+      (token) => !/^__PIP_[a-f0-9]{48}__$/.test(token),
     );
+    const pattern = new RegExp(
+      [
+        "__PIP_[a-f0-9]{48}__",
+        ...fixed.sort((a, b) => b.length - a.length).map(escape),
+      ].join("|"),
+      "g",
+    );
+    return text.replace(pattern, (token) => this.tokens.get(token) ?? token);
   }
 
   restore<T>(value: T, depth = 0): T {
