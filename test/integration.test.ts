@@ -95,11 +95,12 @@ for (const mode of ["source", "packed"] as const) {
     // Stub only the host UI/agent actions, not the extension, loader or middleware runner.
     // 仅模拟宿主界面和智能体动作，不模拟扩展、加载器或中间件执行器。
     let aborted = false;
+    let injected = 0;
     runner.bindCore(
       {
-        sendMessage() {},
-        sendUserMessage() {},
-        appendEntry() {},
+        sendMessage() { injected++; },
+        sendUserMessage() { injected++; },
+        appendEntry() { injected++; },
         setSessionName() {},
         getSessionName: () => undefined,
         setLabel() {},
@@ -113,7 +114,7 @@ for (const mode of ["source", "packed"] as const) {
         setThinkingLevel() {},
       },
       {
-        getModel: () => undefined,
+        getModel: () => ({ provider: "fixture-provider" } as never),
         getScopedModels: () => [],
         isIdle: () => true,
         isProjectTrusted: () => true,
@@ -146,7 +147,27 @@ for (const mode of ["source", "packed"] as const) {
       model: "demo",
       messages: [{ role: "user", content: "fake-private-password" }],
     })) as { messages: { content: string }[] };
+    const auditPath = path.replace(/\.json$/, ".jsonl");
+    const audit = JSON.parse(readFileSync(auditPath, "utf8").trim());
+    assert.equal(audit.provider, "fixture-provider");
+    assert.equal(audit.original, "fake-private-password");
     const token = outgoing.messages[0].content;
+    assert.equal(audit.replacement, token);
+    const command = runner.getCommand("protecter")!;
+    const commandCtx = runner.createCommandContext();
+    const previews: string[] = [];
+    const localCtx = { ...commandCtx, mode: "tui" as const, ui: { ...commandCtx.ui,
+      select: async (_title: string, options: string[]) => options[0],
+      confirm: async () => true,
+      editor: async (_title: string, text?: string) => { previews.push(text ?? ""); return undefined; },
+    } };
+    await command.handler("", localCtx);
+    assert.ok(previews[0].includes("fake-private-password"));
+    await command.handler("logs", { ...localCtx, mode: "rpc" });
+    assert.equal(previews.length, 1);
+    await command.handler("logs", { ...localCtx, ui: { ...localCtx.ui, confirm: async () => false } });
+    assert.equal(previews.length, 1);
+    assert.equal(injected, 0);
     assert.match(token, /^__PIP_[a-f0-9]{48}__$/);
     assert.ok(!JSON.stringify(outgoing).includes("fake-private-password"));
     const original = {
@@ -216,6 +237,7 @@ for (const mode of ["source", "packed"] as const) {
     assert.equal(call.input.content, "fake-private-password");
     for (const [toolName, input] of [
       ["read", { path }],
+      ["read", { path: auditPath }],
       ["bash", { command: `cat ${path}` }],
     ] as const) {
       assert.equal(
@@ -254,6 +276,9 @@ for (const mode of ["source", "packed"] as const) {
         }),
       ).includes("fake-private-password"),
     );
+    rmSync(auditPath);
+    mkdirSync(auditPath);
+    assert.deepEqual(await runner.emitBeforeProviderRequest({ text: "fake-private-password" }), {});
     writeFileSync(path, "invalid-secret-config");
     await runner.emit({ type: "session_start", reason: "reload" });
     assert.deepEqual(

@@ -10,6 +10,7 @@ try {
   );
   const tokenToOriginal = new Map(entries);
   const additions = [];
+  const hitTokens = new Set();
   const matchers = rules.map((rule) => {
     if (typeof rule === "string") return { literal: rule };
     if (rule.type === "literal") return { literal: rule.value };
@@ -79,7 +80,9 @@ try {
     let result = "",
       cursor = 0;
     for (const [start, end] of merged) {
-      result += text.slice(cursor, start) + tokenFor(text.slice(start, end));
+      const token = tokenFor(text.slice(start, end));
+      hitTokens.add(token);
+      result += text.slice(cursor, start) + token;
       cursor = end;
     }
     return result + text.slice(cursor);
@@ -156,7 +159,10 @@ try {
     if (value === null || typeof value === "boolean") return value;
     throw new Error();
   }
-  parentPort.postMessage({ payload: walk(payload), additions });
+  const redacted = walk(payload);
+  const finalText = JSON.stringify(redacted);
+  const hits = [...hitTokens].filter(token => finalText.includes(token)).map(token => [token, tokenToOriginal.get(token)]);
+  parentPort.postMessage({ payload: redacted, additions, hits });
 } catch {
   // Never serialize an exception, original payload or configuration back into diagnostics.
   // 不将异常、原始请求体或配置序列化到诊断信息中。

@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { realpathSync, statSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { CONFIG_NAME } from "./migration.ts";
@@ -51,7 +51,7 @@ export function blocksConfigAccess(
   if (["bash", "powershell"].includes(tool)) {
     const command = typeof input.command === "string" ? input.command : "";
     if (
-      /protecter(?:\.[a-f0-9]{32})?\.json|\.protecter-migration/i.test(
+      /protecter(?:\.[a-f0-9]{32})?\.jsonl?|\.protecter-migration/i.test(
         command,
       ) ||
       command.includes(configPath)
@@ -67,12 +67,14 @@ export function blocksConfigAccess(
       cwd,
     );
     const real = canonical(path);
+    const auditName = /^protecter\.[a-f0-9]{32}\.jsonl(?:\.lock)?$/;
+    const auditAlias = readdirSync(dirname(target)).filter(name => auditName.test(name)).some(name => sameFile(path, resolve(dirname(target), name)));
     return (
       (dirname(real) === dirname(target) &&
-        (CONFIG_NAME.test(basename(real)) ||
+        (CONFIG_NAME.test(basename(real)) || auditName.test(basename(real)) ||
           basename(real).startsWith(".protecter-migration"))) ||
       real === target ||
-      sameFile(path, configPath) ||
+      sameFile(path, configPath) || auditAlias ||
       (recursive && contains(real, target))
     );
   } catch {

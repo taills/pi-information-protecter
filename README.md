@@ -14,7 +14,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 
 ```bash
 # Install the pinned npm release.
-pi install npm:pi-information-protecter@0.2.1
+pi install npm:pi-information-protecter@0.3.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -60,8 +60,18 @@ More examples are in [`protecter.example.json`](protecter.example.json); they ar
 - Escape backslashes as `\\` in JSON. Empty-string matches are invalid; runtime zero-width matches reject the request.
 - Overlapping matches are merged to avoid exposing a longer secret's suffix. Equal values reuse a token within the extension instance.
 - Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
-- `/protecter` and `/protecter status` report cached counts only, without disk access or sensitive values. `/protecter reload` waits for idle and invokes Pi's full reload; it is no longer a status-only command. Adding secrets through command arguments is not supported.
+- `/protecter` opens the local audit viewer; `/protecter logs 50` shows up to 50 recent records. `/protecter status` reports memory counts without reading configuration. `/protecter reload` invokes Pi's full reload after idle. Do not enter secrets as command arguments.
 - Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
+
+## Private audit log
+
+Successful request-body redactions append to `protecter.<machineHash>.jsonl` beside the configuration. Each JSON line includes `time` (`yyyy-mm-dd HH:mm:ss`, local time), `timezoneOffset` (minutes east of UTC), `provider`, `original`, `replacement`, `requestId` and `version`. Provider is Pi's selected provider ID, not an inferred upstream gateway vendor; unavailable metadata is recorded as `unknown`.
+
+One record is written per distinct original/token pair per successful scan; repeated occurrences in that request are deduplicated. Replacing the same original on a later request creates a new record, even when its token is reused. Existing tokens and requests without matches add no records. These are **local redaction events, not proof of network delivery**: cancellation, another hook or a provider failure can occur afterward.
+
+`/protecter` or `/protecter logs [1-100]` reads the most recent records (20 by default). Local TUI only: choose a time/provider entry, then confirm before revealing plaintext. The editor is a preview and discards edits. Controls are escaped; long previews are truncated. RPC/print modes do not display secrets, and the command never calls `sendMessage` or writes session entries.
+
+**Logs contain real secrets and reversible mappings.** Unix permissions are 0600; symlinks, hard links and other-user files are rejected. Tool guards cover current/old hash log names and aliases but are not a sandbox. Logs are not encrypted, automatically rotated, migrated with configuration or used to rebuild mappings. Stop all Pi processes before locally archiving/deleting logs or inspecting a stale `.jsonl.lock`. Reading is bounded to the last 1 MiB, display to 100 records and 20,000 characters per preview. A log is capped at 32 MiB and a request batch at 8 MiB; full, unwritable, partial-tail or locked logs block matched requests rather than silently losing audits. Failed scans add no records; a hard crash can leave a partial batch that requires local repair.
 
 ## How it works
 
@@ -76,7 +86,7 @@ Local response and tool-argument restoration
 ```
 
 1. Scan JSON strings, keys and numbers, including decoded JSON-string tool arguments. Local user input and original history are unchanged.
-2. Generate tokens with `crypto.randomBytes(24)`. Mappings stay **in memory only**, never in configuration, session custom entries, logs or model prompts. Local users can still see original values.
+2. Generate tokens with `crypto.randomBytes(24)`. Runtime mappings stay in memory and are not restored across restarts. **Since 0.3.0, successful original/token pairs are also persisted in the private audit log.** They are never injected into configuration, session custom entries or model prompts.
 3. Restore finalized assistant text, thinking and tool arguments. The TUI Markdown transformer restores complete streamed tokens; partial tokens may briefly appear. RPC/JSON deltas remain masked until final `message_end`. Altered or truncated tokens cannot be restored.
 4. Restore tool arguments before execution so legitimate local operations use original values; redact them again on subsequent requests. **Restoring credentials is not tool authorization or exfiltration prevention.**
 5. Execute regex scans in a terminable worker. On failure, return `{}` and request cancellation rather than relying on hook exceptions swallowed by Pi. An empty request or provider validation error may still occur, but the handler does not return the original payload.
@@ -130,7 +140,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ```bash
 # 安装固定 npm 版本。
-pi install npm:pi-information-protecter@0.2.1
+pi install npm:pi-information-protecter@0.3.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -176,8 +186,18 @@ pi -e ./src/index.ts
 - JSON 中的反斜杠写作 `\\`。不允许匹配空字符串；运行时零宽匹配会拒绝请求。
 - 合并重叠匹配，避免暴露长敏感值的后缀；同一实例内相同原文复用占位符。
 - 已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
-- 状态命令只报告缓存数量，不访问磁盘或显示敏感值。重载命令等待空闲并调用 Pi 完整重载，不再只是查询状态；不支持通过命令参数添加秘密。
+- `/protecter` 打开本地审计查看器，`/protecter logs 50` 查看最近最多 50 条；`/protecter status` 只报告内存数量，不读取配置。`/protecter reload` 等待空闲后完整重载。不要在命令参数中填写秘密。
 - 限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
+
+## 私有审计日志
+
+成功脱敏的请求会追加记录到配置旁的 `protecter.<machineHash>.jsonl`。每行包含 `time`（本地时间 `yyyy-mm-dd HH:mm:ss`）、`timezoneOffset`（相对 UTC 向东的分钟数）、`provider`、`original`、`replacement`、`requestId` 和 `version`。供应商为 Pi 当前选择的 provider ID，不猜测网关背后的上游厂商；无法获取时记录 `unknown`。
+
+每次成功扫描，对不同的原文与占位符组合分别记录一行，同一请求内重复出现会去重。后续请求再次替换同一原文时仍新增记录，即使复用占位符。已有占位符和无命中请求不新增记录。日志表示**本地脱敏事件，而非网络已成功发送**，之后仍可能取消、被其他钩子修改或发生提供商错误。
+
+`/protecter` 或 `/protecter logs [1-100]` 查看最近记录，默认 20 条。仅在本地 TUI 可用：先选择时间及供应商条目，确认后才显示明文。编辑器只作预览，修改不保存；控制字符转义，过长预览截断。RPC、打印模式不展示秘密，命令不调用消息发送接口，也不写入会话条目。
+
+**日志包含真实秘密及可逆映射。** Unix 权限为 0600，拒绝符号链接、硬链接及他人文件。工具防护覆盖当前和旧机器哈希日志及别名，但不是沙箱。日志不加密、不自动轮转、不随配置迁移，也不用于恢复映射。请停止全部 Pi 进程后再本地归档、删除日志或检查残留 `.jsonl.lock`。读取限最后 1 MiB、最多 100 条，每条预览最多 20,000 字符；单日志上限 32 MiB、请求批次 8 MiB。日志满、不可写、尾部残缺或锁占用时，命中请求会被阻止，不静默漏记。扫描失败不新增记录，硬崩溃可能遗留部分批次，需本地修复。
 
 ## 工作方式
 
@@ -192,7 +212,7 @@ __PIP_<192-bit 随机十六进制>__ → LLM 网关
 ```
 
 1. 扫描 JSON 字符串、键和数字，包括解码后的 JSON 字符串工具参数；不修改本地用户输入和历史原文。
-2. 使用 `crypto.randomBytes(24)` 生成占位符。映射**仅存于内存**，不写入配置、会话自定义条目、日志或模型提示；本地用户仍可看到原文。
+2. 使用 `crypto.randomBytes(24)` 生成占位符。运行时映射保存在内存，不跨重启恢复。**从 0.3.0 起，成功替换的原文和占位符也会持久化到私有审计日志。** 不注入配置、会话自定义条目或模型提示。
 3. 还原最终 assistant 文本、思考内容和工具参数。TUI 在完整占位符到达后还原，片段可能短暂显示；RPC/JSON 增量仍脱敏，直到最终消息还原。被改写或截断的占位符无法还原。
 4. 工具执行前还原参数，让合法本地操作使用原值；后续请求再次脱敏。**凭证还原不等于工具授权或防外传。**
 5. 正则扫描运行于可终止 worker。失败时返回 `{}` 并请求取消，不依赖被 Pi 吞掉的钩子异常；仍可能产生空请求或提供商校验错误，但处理器不返回原始请求体。

@@ -37,7 +37,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   pi.on("before_provider_request", async (event, ctx) => {
     try {
       if (!compatible) throw new Error();
-      const payload = await engine.redact(event.payload);
+      const payload = await engine.redact(event.payload, ctx.model?.provider ?? "unknown");
       healthy = true;
       return payload;
     } catch {
@@ -127,16 +127,44 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   );
 
   pi.registerCommand("protecter", {
-    description: "SPI Protecter memory status / 内存状态（不显示敏感值）",
+    description: "View local protection records / 查看本地保护记录",
     handler: async (args, ctx) => {
-      if (args.trim() && !["status", "reload"].includes(args.trim())) {
+      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const action = parts[0] ?? "logs";
+      if (!["status", "reload", "logs"].includes(action) || (action !== "logs" && parts.length > 1) || parts.length > 2 || (parts[1] !== undefined && !/^(?:[1-9]\d?|100)$/.test(parts[1]))) {
         ctx.ui.notify(
-          "用法：/protecter [status|reload]。不要在命令参数中填写敏感值。",
+          "Usage / 用法: /protecter [logs [1-100]|status|reload]. No secrets in arguments / 不要在参数中输入秘密。",
           "info",
         );
         return;
       }
-      if (args.trim() === "reload") {
+      if (action === "logs") {
+        // TUI only: never send plaintext to RPC clients or model/session messages.
+        // 仅限本地 TUI，不将明文发送给 RPC 客户端或模型及会话消息。
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify("Local TUI required / 请在本地 TUI 查看记录。", "warning");
+          return;
+        }
+        try {
+          const { records, truncated } = engine.auditRecords(Number(parts[1] ?? 20));
+          if (!records.length) {
+            ctx.ui.notify("No readable records / 暂无可读记录。", "info");
+            return;
+          }
+          const safe = (value: unknown) => JSON.stringify(value).replace(/[\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, ch => `\\u${ch.charCodeAt(0).toString(16).padStart(4, "0")}`);
+          const choices = records.map((r, i) => `${i + 1}. ${safe(r.time)} | ${safe(r.provider).slice(0, 120)}`);
+          const selected = await ctx.ui.select(`Protection records / 保护记录${truncated ? " (limited tail / 有限尾部)" : ""}`, choices);
+          const index = selected === undefined ? -1 : choices.indexOf(selected);
+          if (index < 0) return;
+          if (!await ctx.ui.confirm("Sensitive plaintext / 敏感明文", "Reveal locally? Never share this view / 确认本地显示？请勿分享此界面。")) return;
+          const text = safe(records[index]);
+          await ctx.ui.editor("Local preview; edits discarded / 本地预览，编辑不保存", text.length > 20000 ? text.slice(0, 20000) + "\n[Preview truncated / 预览截断]" : text);
+        } catch {
+          ctx.ui.notify("Cannot read audit records / 无法读取审计记录。", "error");
+        }
+        return;
+      }
+      if (action === "reload") {
         await ctx.waitForIdle();
         await ctx.reload();
         return;

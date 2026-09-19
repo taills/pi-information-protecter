@@ -19,8 +19,12 @@ Prevent configured personal information from accidentally entering Pi LLM reques
 
 ## Implementation / 实现策略
 
-- Scan outgoing payload text; use random 192-bit placeholders and memory-only reverse mappings.
-  扫描出站请求体文本，使用随机 192-bit 占位符及仅内存反向映射。
+- Scan outgoing payload text with random 192-bit placeholders. Runtime mappings stay in memory, but version 0.3.0 adds plaintext original/token audit pairs in private JSONL. Audit files are sensitive credential stores, not encrypted archives; never upload them. Logs persist after exit and are not loaded to restore tokens.
+  出站文本使用随机占位符，运行映射保存在内存，但 0.3.0 新增私有 JSONL 原文与占位符审计。日志属于敏感凭证存储，不是加密归档，禁止上传；退出后仍保留，不用于恢复占位符。
+- Audit writes use 0600 files, safe-open checks, a cooperative lock and fsync before returning a redacted payload. Logging errors fail closed. Success means local replacement, not provider delivery. File size and preview limits bound resource usage; users manage retention locally. Hard crashes may leave stale locks or partial records. Same-UID writers and terminal capture remain outside the threat model.
+  日志使用 0600、安全打开检查、协作锁，并在返回脱敏请求前同步落盘；日志失败则拒绝请求。成功表示本地替换而非网关已接收。文件及预览大小受限，用户本地管理保留策略；硬崩溃可能残留锁或不完整记录，同用户权限攻击和终端录屏仍不在防护范围。
+- `/protecter` previews are TUI-only and require confirmation before showing original values; nothing is injected into model context or session entries. Trusted extensions may still observe UI hooks. Configuration caching remains memory-only during requests, but matched requests now perform audit-file writes.
+  查看器仅限 TUI，展示原文前需确认，不注入模型上下文或会话条目；可信扩展仍可能观察 UI 钩子。出站规则依然使用内存缓存，但命中请求现在会写审计文件。
 - Limit worker regex scans to 2 seconds, with resource and input limits. Errors exclude original configuration, rules and request text.
   worker 正则扫描限制为 2 秒，并限制资源和输入；错误不包含原始配置、规则或请求文本。
 - Pi 0.85.1 catches `before_provider_request` errors and continues with the current payload. Error paths therefore return `{}` and attempt cancellation. This does not guarantee zero HTTP requests; it prevents this handler from falling back to the original payload.

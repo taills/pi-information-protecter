@@ -5,6 +5,8 @@ coverage/
 .playwright-mcp/
 protecter.json
 protecter.*.json
+protecter.*.jsonl
+protecter.*.jsonl.lock/
 !protecter.example.json
 .protecter-migration*
 *.log

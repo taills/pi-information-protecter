@@ -2,9 +2,10 @@ import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import { migrateConfig, type Snapshot } from "./migration.ts";
 import { getMachineHash } from "./machine.ts";
+import { appendAudit, readAudit } from "./audit.ts";
 
 export const REQUEST_ERROR =
-  "protecter: 请求已清空。配置无效、扫描超时或包含不支持的附件；修复后重试。";
+  "SPI Protecter: request cleared; check config, audit log, scan limits or attachments / 请求已清空，请检查配置、审计日志、扫描限制或附件。";
 export class Protecter {
   private readonly tokens = new Map<string, string>();
   private queue: Promise<unknown> = Promise.resolve();
@@ -27,6 +28,11 @@ export class Protecter {
   get configPath(): string {
     return this.snapshot?.path ?? "";
   }
+  get auditPath(): string { return this.configPath ? this.configPath.replace(/\.json$/, ".jsonl") : ""; }
+  auditRecords(limit = 20) {
+    if (!this.ready) throw new Error(REQUEST_ERROR);
+    return readAudit(this.auditPath, limit);
+  }
   get ruleCount(): number {
     return this.snapshot?.config.sensitiveWords.length ?? 0;
   }
@@ -41,13 +47,13 @@ export class Protecter {
    * Serialise scans so two requests cannot assign different tokens to the same value.
    * 串行扫描，避免两个请求为同一原文分配不同占位符。
    */
-  redact(payload: unknown): Promise<unknown> {
-    const run = this.queue.then(() => this.scan(payload));
+  redact(payload: unknown, provider = "unknown"): Promise<unknown> {
+    const run = this.queue.then(() => this.scan(payload, provider));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private async scan(payload: unknown): Promise<unknown> {
+  private async scan(payload: unknown, provider: string): Promise<unknown> {
     if (!this.ready) throw new Error(REQUEST_ERROR);
     const { config, sourceRaws } = this.snapshot!;
     const serialized = JSON.stringify(payload);
@@ -59,7 +65,7 @@ export class Protecter {
     } catch {
       throw new Error(REQUEST_ERROR);
     }
-    return new Promise((resolve, reject) => {
+    const result = await new Promise<{ payload: unknown; additions: [string, string][]; hits: [string, string][] }>((resolve, reject) => {
       let settled = false;
       const worker = new Worker(
         fileURLToPath(new URL("./scan-worker.mjs", import.meta.url)),
@@ -78,6 +84,7 @@ export class Protecter {
       const finish = (data?: {
         payload: unknown;
         additions: [string, string][];
+        hits: [string, string][];
       }) => {
         if (settled) return;
         settled = true;
@@ -88,15 +95,18 @@ export class Protecter {
           reject(new Error(REQUEST_ERROR));
           return;
         }
-        for (const [token, original] of data.additions)
-          this.tokens.set(token, original);
-        resolve(data.payload);
+        resolve(data);
       };
       const timer = setTimeout(() => finish(), this.timeoutMs);
       worker.once("message", (data) => finish(data.failed ? undefined : data));
       worker.once("error", () => finish());
       worker.once("exit", () => finish());
     });
+    if (this.closed) throw new Error(REQUEST_ERROR);
+    await appendAudit(this.auditPath, provider, result.hits);
+    if (this.closed) throw new Error(REQUEST_ERROR);
+    for (const [token, original] of result.additions) this.tokens.set(token, original);
+    return result.payload;
   }
 
   restoreText(text: string): string {

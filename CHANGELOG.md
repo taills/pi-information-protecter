@@ -1,5 +1,16 @@
 # Changelog / 更新日志
 
+## 0.3.0 — Private redaction audit / 私有脱敏审计
+
+- Persist successful distinct original/token pairs per request in `protecter.<machineHash>.jsonl`, with local timestamp, UTC offset, provider ID and request ID. This intentionally adds plaintext sensitive data on disk; records represent local redaction, not confirmed network delivery.
+  按请求持久化唯一原文与占位符到私有 JSONL，含本地时间、时区偏移、供应商及请求 ID；明确新增磁盘敏感明文，记录表示本地脱敏而非网络已送达。
+- `/protecter` and `logs [1-100]` open a bounded local TUI viewer with confirmation; keep status/reload subcommands, never inject audit records into model/session context.
+  命令提供有限本地查看及确认，保留状态和重载，不将审计注入模型或会话。
+- Add private permissions, unsafe-link rejection, cooperative write locks, fsync, log limits and fail-closed audit errors; protect log paths and aliases from direct tools.
+  增加私有权限、链接拒绝、协作写锁、落盘同步、日志限制及失败拒绝请求，保护日志路径和别名。
+- Add source and packed-distribution regression coverage for audit writing and command UI.
+  增加源码及实际发布包的日志写入和命令界面回归验证。
+
 ## 0.2.1 — Compiled distribution / 编译产物发布
 
 - Publish compiled, bundled and minified ESM in `dist/`, including both workers; exclude source and source maps from npm packages.
