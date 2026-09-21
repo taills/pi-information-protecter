@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.6.2 — Numeric replacement retry and restoration / 数值替换重试与还原
 
 ### Fixed / 修复
 
@@ -14,6 +14,11 @@
   新增回归：反复脱敏小数与指数，断言每个字段仍为有限的 JSON 数字。
 - Add a regression asserting that one value maps to one replacement across strings, object keys, numbers, nested structures and JSON-encoded tool arguments in the same request.
   新增回归：同一请求中的字符串、对象键、数字、嵌套结构和 JSON 编码的工具参数，同一值始终替换为同一个值。
+
+### Notes / 说明
+
+- A rule without digit boundaries can match inside an unrelated long number. Replacing digits in a value close to `Number.MAX_SAFE_INTEGER`, such as a tool schema upper bound, then pushed the result past the safe-integer range and blocked almost every request; add `(?<!\d)` and `(?!\d)` guards to numeric rules.
+  没有数字边界的规则会在无关的长数字内部匹配。当数值接近 `Number.MAX_SAFE_INTEGER`（例如工具结构的上限）时，替换其中的数字会使结果超出安全整数范围，几乎拦截每个请求；请为数字规则加上 `(?<!\d)` 和 `(?!\d)` 边界。
 
 ## 0.6.1 — Valid address replacements / 合法的地址替换
 
