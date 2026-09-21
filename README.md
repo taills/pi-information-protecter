@@ -10,7 +10,7 @@ A Pi extension that inspects outgoing LLM request bodies locally, replaces confi
 
 ## Installation
 
-Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.86.x**, tested against 0.85.1, 0.86.0 and 0.86.1. Legacy `@mariozechner/*` releases are not supported.
+Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x or 0.85.1–0.87.x**. Every accepted release was verified by running the full suite, including the real loader and worker integration tests. 0.83.0 and earlier lack `registerMarkdownTransformer`, and 0.85.0 imports `@earendil-works/pi-server`, which no Pi release declares, so both fail to load. Legacy `@mariozechner/*` releases are not supported.
 
 ```bash
 # Install the pinned npm release.
@@ -225,7 +225,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ## 安装
 
-要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.85.1–0.86.x**，已在 0.85.1、0.86.0 和 0.86.1 上验证。不支持旧 `@mariozechner/*` 版本。
+要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.84.0–0.84.x 或 0.85.1–0.87.x**。每个受支持版本都经过完整测试验证（含真实加载器与 worker 集成测试）。0.83.0 及更早缺少 `registerMarkdownTransformer`，0.85.0 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`，两者均无法加载。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
 # 安装固定 npm 版本。

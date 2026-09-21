@@ -33,8 +33,8 @@ Prevent configured personal information from accidentally entering Pi LLM reques
   拦截诊断仅包含目录错误码、阶段、非负整数定位和白名单系统错误码。规则序号和节点数只是位置，不是内容。不输出原始异常消息、请求文本、命中原文、替换值、配置内容和文件路径，worker 边界同样适用，因此诊断可安全分享；错误码有意保持粗粒度，精确定位规则仍可能需要本地查看。
 - Limit worker regex scans to 2 seconds, with resource and input limits. Errors exclude original configuration, rules and request text.
   worker 正则扫描限制为 2 秒，并限制资源和输入；错误不包含原始配置、规则或请求文本。
-- Pi 0.85.1–0.86.x catches `before_provider_request` errors and continues with the current payload. Error paths therefore return `{}` and attempt cancellation. This does not guarantee zero HTTP requests; it prevents this handler from falling back to the original payload.
-  Pi 0.85.1–0.86.x 会捕获该钩子异常并继续使用当前请求体，因此错误路径返回空对象并尝试取消。这不保证没有 HTTP 请求，只保证本处理器不回退原始请求体。
+- Pi 0.84.0–0.87.x catches `before_provider_request` errors and continues with the current payload. Error paths therefore return `{}` and attempt cancellation. This does not guarantee zero HTTP requests; it prevents this handler from falling back to the original payload.
+  Pi 0.84.0–0.87.x 会捕获该钩子异常并继续使用当前请求体，因此错误路径返回空对象并尝试取消。这不保证没有 HTTP 请求，只保证本处理器不回退原始请求体。
 - Create configuration separately with Unix mode 0600. Reject links, non-regular files, multiple links and files owned by others. Users remain responsible for directories and OS permissions; TOCTOU races are not prevented.
   独立创建配置，Unix 权限为 0600；拒绝链接、非普通文件、多链接及他人所有文件。用户仍需维护目录和系统权限，无法防止检查与使用之间的竞态。
 - Direct-access blocking is supplementary. File tools inspect target paths rather than document bodies. Shell can bypass string checks, and command mentions or ancestor directory checks can still cause false positives.
@@ -43,8 +43,8 @@ Prevent configured personal information from accidentally entering Pi LLM reques
   启动或重载时校验并合并机器哈希配置后缓存，请求只使用内存；文件删除不撤销缓存秘密，重载或退出才清理实例。迁移采用先提交后删除及协作进程锁，并非多文件事务或恶意本地写入防护；残留锁需本地检查，Windows 无 POSIX 目录同步。
 - Whole-configuration text detection does not guarantee that every reformatted rule definition is masked.
   整体配置文本检测不保证所有重新格式化的规则定义都被遮盖。
-- Compaction and tree summaries are conservatively disabled. Do not widen Pi compatibility without verification.
-  保守禁用压缩和树摘要，未经验证不扩大 Pi 兼容范围。
+- Compaction and tree summaries are conservatively disabled. Do not widen Pi compatibility without verification: refusing a working release blocks every request, and accepting a broken one can send plaintext. Each supported version is established by running the full suite against it, and the runtime gate and declared peer range are kept identical.
+  保守禁用压缩和树摘要，未经验证不扩大 Pi 兼容范围：误拒可用版本会拦截所有请求，误受损坏版本则可能发送明文。每个受支持版本均以完整测试验证，并保持运行时门禁与声明的 peer 范围一致。
 
 ## Fixed aliases and caching / 固定别名与缓存
 

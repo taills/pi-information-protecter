@@ -4,6 +4,7 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Protecter } from "./engine.ts";
+import { supportsPi } from "./compat.ts";
 import { blocksConfigAccess } from "./guard.ts";
 import {
   failure,
@@ -22,15 +23,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // 每个环境只用一种语言，不同时展示两种语言。
   setLocale(detectLocale());
   const engine = new Protecter(getAgentDir());
-  // Verified against 0.85.1 and 0.86.x. A newer line may change hook payloads
-  // or restoration semantics, so refuse instead of guessing.
-  // 已验证 0.85.1 与 0.86.x。更新的版本系列可能改变钩子数据或还原语义，因此拒绝而非猜测。
-  const version = /^(\d+)\.(\d+)\.(\d+)/.exec(VERSION);
-  const compatible =
-    version !== null &&
-    Number(version[1]) === 0 &&
-    ((Number(version[2]) === 85 && Number(version[3]) >= 1) ||
-      Number(version[2]) === 86);
+  const compatible = supportsPi(VERSION);
   let healthy = false;
   // Remember the last block so the user can inspect it after the notification.
   // 保留最近一次拦截原因，供通知消失后查看。

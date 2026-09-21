@@ -1,11 +1,25 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.7.0 — Verified Pi compatibility range / 经验证的 Pi 兼容范围
+
+### Changed / 变更
+
+- Accept Pi 0.84.0-0.84.x and 0.85.1-0.87.x, established by running the full suite, including the real loader and worker integration tests, against every candidate release. The previous range was wrong in both directions: the whole 0.84 line and 0.87.0 pass but were refused, which fails every request closed while the status bar still shows the extension as loaded.
+  接受 Pi 0.84.0-0.84.x 与 0.85.1-0.87.x，依据是在每个候选版本上运行完整测试（含真实加载器与 worker 集成测试）。之前的范围两个方向都错：整个 0.84 系列和 0.87.0 均可通过却被拒绝，而被拒绝时每个请求都拒绝放行，状态栏却仍显示扩展已加载。
+- Keep 0.83.0 and earlier refused: they lack `registerMarkdownTransformer`, which this extension always registers, so loading fails outright.
+  继续拒绝 0.83.0 及更早版本：它们缺少本扩展必定注册的 `registerMarkdownTransformer`，加载直接失败。
+- Keep 0.85.0 refused: it ships `dist/experimental/server.js` importing `@earendil-works/pi-server`, which no Pi release declares as a dependency, so the module cannot resolve. This is a Pi packaging defect, not an extension limit.
+  继续拒绝 0.85.0：其 `dist/experimental/server.js` 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`，模块无法解析。这是 Pi 的打包缺陷，不是扩展限制。
 
 ### Fixed / 修复
 
-- Correct the `UNSUPPORTED_PI` message, which still named 0.85.x only after 0.86 support was added in 0.6.4. The version gate itself was already correct, so only the advice text was wrong.
-  修正 `UNSUPPORTED_PI` 文案：0.6.4 已支持 0.86，但提示仍只写 0.85.x。版本门禁本身正确，仅建议文案有误。
+- Correct the `UNSUPPORTED_PI` message, which still named 0.85.x only after 0.86 support was added in 0.6.4. The advice now quotes the same constant the gate uses, so the two cannot drift again.
+  修正 `UNSUPPORTED_PI` 文案：0.6.4 已支持 0.86，但提示仍只写 0.85.x。现在建议文案引用与门禁相同的常量，两者不会再次脱节。
+
+### Added / 新增
+
+- Move the version gate into `supportsPi()` and cover the accepted and refused boundaries, prerelease suffixes, and agreement between the gate and the advice text in both languages.
+  将版本门禁抽取为 `supportsPi()`，并覆盖接受与拒绝边界、预发布后缀，以及门禁与两种语言建议文案的一致性。
 
 ## 0.6.4 — Pi 0.86 support / 支持 Pi 0.86
 

@@ -1,6 +1,6 @@
 {
   "name": "pi-information-protecter",
-  "version": "0.6.4",
+  "version": "0.7.0",
   "description": "Sensitive Personal Information (SPI) Protecter — local reversible privacy redaction for Pi",
   "type": "module",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "node": ">=22"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.85.1 <0.87.0"
+    "@earendil-works/pi-coding-agent": ">=0.84.0 <0.85.0 || >=0.85.1 <0.88.0"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.86.1",
