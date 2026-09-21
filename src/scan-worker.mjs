@@ -1,7 +1,7 @@
 // A separate worker bounds user-supplied JavaScript regex execution (including ReDoS).
 // 独立 worker 限制用户正则的执行时间，包括正则拒绝服务风险。
 import { parentPort, workerData } from "node:worker_threads";
-import { numericRoundTrips, reshapeInteger, reshapeText } from "./shape.mjs";
+import { numericRoundTrips, reshapeInteger, reshapeValue } from "./shape.mjs";
 
 // Track the active rule/node so blocks can be located without exposing content.
 // 记录当前规则和节点，使拦截可定位而不暴露内容。
@@ -63,7 +63,7 @@ try {
       const candidate =
         numeric && /^\d+$/.test(original)
           ? reshapeInteger(original)
-          : reshapeText(original);
+          : reshapeValue(original);
       if (!candidate || candidate === original) continue;
       // Reject values already meaningful elsewhere, so restoration stays exact.
       // 拒绝已在别处出现的值，确保还原精确。

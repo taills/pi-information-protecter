@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { isIPv4, isIPv6 } from "node:net";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -164,6 +165,75 @@ test("exhausted and unsafe shapes fail closed / 无可用形状或数值不安�
     await codeOf(exponent.engine.redact({ big: 1e21 })),
     "SCAN_NUMBER_UNSAFE",
   );
+});
+
+test("addresses stay parseable after replacement / 地址替换后仍可解析", async (t) => {
+  // Digit-wise replacement would produce octets above 255 and non-hex groups.
+  // 逐位替换会产生超过 255 的段和非十六进制分组。
+  const { engine } = await fixture(t, [
+    {
+      type: "regex",
+      pattern:
+        "(?<![\\w.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?![\\w.])",
+    },
+    {
+      type: "regex",
+      pattern: "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\\w:.])",
+    },
+    {
+      type: "regex",
+      pattern:
+        "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){1,6}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,5})?(?![\\w:.])",
+    },
+  ]);
+  const input = {
+    a: "192.168.1.10",
+    b: "10.0.255.254",
+    c: "8.8.8.8",
+    d: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+    e: "fe80::1ff:fe23:4567",
+    keep: "version 1.2.3 and ratio 4.5.6.7.8",
+  };
+  const masked = (await engine.redact(input)) as typeof input;
+  for (const key of ["a", "b", "c"] as const) {
+    assert.ok(isIPv4(masked[key]), `${key}: ${masked[key]}`);
+    assert.notEqual(masked[key], input[key]);
+    assert.equal(masked[key].length, input[key].length);
+  }
+  for (const key of ["d", "e"] as const) {
+    assert.ok(isIPv6(masked[key]), `${key}: ${masked[key]}`);
+    assert.notEqual(masked[key], input[key]);
+    assert.equal(masked[key].length, input[key].length);
+  }
+  // Compressed groups keep their position. / 压缩写法的位置保持不变。
+  assert.ok(masked.e.includes("::"));
+  // Version-like numbers are not addresses. / 类版本号数字不是地址。
+  assert.equal(masked.keep, input.keep);
+  assert.deepEqual(JSON.parse(JSON.stringify(engine.restore(masked))), input);
+});
+
+test("shipped example rules load and protect their targets / 示例配置可加载并生效", async (t) => {
+  const example = JSON.parse(
+    fs.readFileSync("protecter.example.json", "utf8"),
+  ) as { sensitiveWords: Rule[] };
+  const { engine } = await fixture(t, example.sensitiveWords);
+  const input = {
+    domain: "vpn.internal.corp",
+    host: "db-01.prod.lan",
+    email: "zhang.san+work@corp.example.com",
+    v4: "172.16.42.7",
+    v6: "2001:0db8:85a3:0000:0000:8a2e:0370:7334",
+    fixed: "vpn.internal.example",
+  };
+  const masked = (await engine.redact(input)) as typeof input;
+  for (const value of Object.values(input))
+    assert.ok(!JSON.stringify(masked).includes(value), value);
+  assert.equal(masked.fixed, "gateway.internal.example");
+  assert.ok(isIPv4(masked.v4));
+  assert.ok(isIPv6(masked.v6));
+  assert.match(masked.email, /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/);
+  assert.match(masked.domain, /^[a-z]{3}\.[a-z]{8}\.[a-z]{4}$/);
+  assert.deepEqual(JSON.parse(JSON.stringify(engine.restore(masked))), input);
 });
 
 test("repeat requests reuse the same shaped value / 重复请求复用同一同形值", async (t) => {

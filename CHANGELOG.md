@@ -1,5 +1,21 @@
 # Changelog / 更新日志
 
+## 0.6.1 — Valid address replacements / 合法的地址替换
+
+### Fixed / 修复
+
+- Keep replaced IPv4 addresses valid by bounding every octet to 0-255; per-character replacement produced octets such as `574.676.2.86`.
+  替换后的 IPv4 保持每段在 0-255 内；逐字符替换会产生如 `574.676.2.86` 的非法地址。
+- Keep replaced IPv6 addresses valid by replacing hex digits within the hexadecimal alphabet and preserving `::` compression, group widths and any embedded IPv4 tail; per-character replacement produced non-hex characters.
+  替换后的 IPv6 保持合法：十六进制字符仍在十六进制范围内，并保留 `::` 压缩写法、分组宽度和末尾嵌入的 IPv4；逐字符替换会产生非十六进制字符。
+
+### Added / 新增
+
+- Add internal-domain, email, IPv4 and IPv6 rule examples to `protecter.example.json`, including a fixed-alias domain.
+  在示例配置中新增内网域名、邮箱、IPv4 和 IPv6 规则示例，包含一个固定别名域名。
+- Add regressions asserting `net.isIPv4`/`net.isIPv6` acceptance, `::` preservation, no false match on version-like numbers, and that the shipped example file loads and protects its targets.
+  新增回归：验证替换结果通过 `net.isIPv4`/`net.isIPv6`、保留 `::`、不误匹配类版本号数字，以及发布的示例配置可加载并生效。
+
 ## 0.6.0 — Shape-preserving replacements and single-language messages / 同形替换与单语言消息
 
 ### Changed / 变更

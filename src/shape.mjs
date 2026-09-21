@@ -72,6 +72,71 @@ export function reshapeText(text) {
   return out;
 }
 
+const IPV4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+const OCTET_BOUNDS = { 1: [0n, 9n], 2: [10n, 99n], 3: [100n, 255n] };
+
+/** Keep an octet inside 0-255 so the address stays routable-looking. / 保持在 0-255 内，使地址仍然合法。 */
+function reshapeOctet(octet) {
+  // Leading zeros are positional and already bound the value below 100.
+  // 前导零属于位置信息，且已将数值限制在 100 以内。
+  if (octet.length > 1 && octet.startsWith("0")) {
+    let out = "0";
+    for (let index = 1; index < octet.length; index++)
+      out += String(randomBelow(10n));
+    return out;
+  }
+  const [low, high] = OCTET_BOUNDS[octet.length];
+  return String(low + randomBelow(high - low + 1n));
+}
+
+/** Replace an IPv4 address with a valid one of the same digit layout. / 替换为位数布局相同的合法 IPv4。 */
+export function reshapeIpv4(text) {
+  const match = IPV4.exec(text);
+  if (!match || match.slice(1).some((octet) => Number(octet) > 255))
+    return undefined;
+  return match.slice(1).map(reshapeOctet).join(".");
+}
+
+/** Hex digits must stay hex or the address stops parsing. / 十六进制字符必须仍为十六进制，否则无法解析。 */
+function reshapeHex(text) {
+  let out = "";
+  for (const char of text) {
+    if (char >= "0" && char <= "9") out += String(randomBelow(10n));
+    else if (char >= "a" && char <= "f")
+      out += String.fromCharCode(0x61 + Number(randomBelow(6n)));
+    else if (char >= "A" && char <= "F")
+      out += String.fromCharCode(0x41 + Number(randomBelow(6n)));
+    else out += char;
+  }
+  return out;
+}
+
+/**
+ * Replace an IPv6 address, preserving `::`, group widths and any IPv4 tail.
+ * 替换 IPv6 地址，保留 `::`、分组宽度和末尾的 IPv4 部分。
+ */
+export function reshapeIpv6(text) {
+  if (!text.includes(":")) return undefined;
+  const tail = text.lastIndexOf(":");
+  const embedded = text.slice(tail + 1);
+  if (embedded.includes(".")) {
+    const shaped = reshapeIpv4(embedded);
+    if (!shaped || !/^[0-9A-Fa-f:]*$/.test(text.slice(0, tail + 1)))
+      return undefined;
+    return reshapeHex(text.slice(0, tail + 1)) + shaped;
+  }
+  if (!/^[0-9A-Fa-f:]+$/.test(text)) return undefined;
+  return reshapeHex(text);
+}
+
+/**
+ * Prefer a format-aware shape, then fall back to per-script replacement.
+ * 优先使用格式感知的同形值，否则回退到按文字体系替换。
+ */
+export function reshapeValue(text) {
+  return reshapeIpv4(text) ?? reshapeIpv6(text) ?? reshapeText(text);
+}
+
 /**
  * Same digit count, no leading-zero change, always a safe integer.
  * 位数一致、不改变前导零、始终保持安全整数。
