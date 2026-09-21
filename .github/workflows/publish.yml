@@ -74,7 +74,9 @@ jobs:
     needs: validate
     if: github.event_name == 'push' || !inputs.dry_run
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Publishing takes ~2 minutes; the rest is the registry-propagation wait.
+    # 发布约 2 分钟，其余时间用于等待 registry 同步。
+    timeout-minutes: 20
     environment: npm
     permissions:
       contents: read
@@ -102,15 +104,20 @@ jobs:
       - name: Verify registry version / 验证 registry 版本
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          # npm may process accepted publishes asynchronously. / npm 可能异步处理。
-          for attempt in $(seq 1 18); do
+          # npm accepts a publish before the read path serves it; propagation
+          # has taken over three minutes, so wait six before failing.
+          # npm 接受发布早于读取端可见，实测同步超过三分钟，因此等待六分钟。
+          for attempt in $(seq 1 36); do
             if npm view "pi-information-protecter@$VERSION" \
               version dist.integrity dist.tarball --json \
               --prefer-online --registry=https://registry.npmjs.org; then
               exit 0
             fi
-            echo "Waiting for registry / 等待 registry: $attempt/18"
+            echo "Waiting for registry / 等待 registry: $attempt/36"
             sleep 10
           done
-          echo "Verify later; do not republish / 请稍后验证，不要重复发布"
+          echo "Publish was accepted; only verification timed out."
+          echo "发布已被接受，仅验证超时。"
+          echo "Check the registry before acting; do not republish."
+          echo "请先查证 registry 再处理，不要重复发布。"
           exit 1

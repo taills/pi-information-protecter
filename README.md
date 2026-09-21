@@ -10,7 +10,7 @@ A Pi extension that inspects outgoing LLM request bodies locally, replaces confi
 
 ## Installation
 
-Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, tested against 0.85.1. Legacy `@mariozechner/*` releases are not supported.
+Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.86.x**, tested against 0.85.1, 0.86.0 and 0.86.1. Legacy `@mariozechner/*` releases are not supported.
 
 ```bash
 # Install the pinned npm release.
@@ -213,7 +213,7 @@ Tests use temporary directories and fictional secrets, never real user configura
 
 `npm run build` bundles local modules with esbuild, removes TypeScript types and minifies output. Node built-ins and Pi peer packages remain external. No source maps or source files are published; source remains available on GitHub. Minification reduces size, not visibility or security. `npm pack` rebuilds via `prepack`; `npm publish` first runs checks. Tests also extract the actual npm tarball and run Pi's loader and both workers from it. See the repository's `docs/BUILDING.md` for details.
 
-API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.85.1 documentation and runner implementation. Licensed under MIT.
+API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.86.1 documentation and runner implementation. Licensed under MIT.
 
 ---
 
@@ -225,7 +225,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ## 安装
 
-要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**，验证基线为 0.85.1。不支持旧 `@mariozechner/*` 版本。
+要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.85.1–0.86.x**，已在 0.85.1、0.86.0 和 0.86.1 上验证。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
 # 安装固定 npm 版本。
@@ -428,4 +428,4 @@ npm run check
 
 `npm run build` 使用 esbuild 合并本地模块、移除类型并压缩产物，Node 内置模块和 Pi peer 依赖保持外部引用。不发布源码或 source map，源码仍可在 GitHub 查阅。压缩是体积优化，不是加密或安全隔离。`npm pack` 通过 `prepack` 自动构建，`npm publish` 先执行检查。测试还会解压实际 npm 压缩包，用 Pi 加载器和两个 worker 验证产物。详见仓库内的 `docs/BUILDING.md`。
 
-接口依据为 [Pi 官方扩展文档](https://pi.dev/docs/latest/extensions)、本机 0.85.1 文档及执行器实现；采用 MIT 许可证。
+接口依据为 [Pi 官方扩展文档](https://pi.dev/docs/latest/extensions)、本机 0.86.1 文档及执行器实现；采用 MIT 许可证。

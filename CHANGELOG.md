@@ -1,5 +1,17 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Added / 新增
+
+- Support Pi 0.86.x. The runtime gate accepted only 0.85.x, so on 0.86 every request failed closed with `UNSUPPORTED_PI`. Verified against 0.85.1, 0.86.0 and 0.86.1, including the real loader and worker integration tests.
+  支持 Pi 0.86.x。运行时门禁只接受 0.85.x，因此在 0.86 上每个请求都以 `UNSUPPORTED_PI` 拒绝放行。已在 0.85.1、0.86.0 和 0.86.1 上验证，包含真实加载器与 worker 集成测试。
+
+### Changed / 变更
+
+- Wait up to six minutes for the registry to serve a published version, because npm accepts a publish before the read path serves it; a three-minute wait reported a false failure for an accepted 0.6.2 publish.
+  发布后最多等待六分钟直到 registry 可读，因为 npm 接受发布早于读取端可见；三分钟的等待曾对已被接受的 0.6.2 发布报出虚假失败。
+
 ## 0.6.3 — Conversations no longer block after a rule learns a value / 规则学习到值后不再拦截会话
 
 ### Fixed / 修复
