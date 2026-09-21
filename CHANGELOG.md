@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.7.1 — Install the latest release by default / 默认安装最新版本
 
 ### Documentation / 文档
 
