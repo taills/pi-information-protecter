@@ -15,11 +15,28 @@ export type Rule =
   | string
   | { type: "literal"; value: string; replacement?: string }
   | { type: "regex"; pattern: string; flags?: string; replacement?: string };
+/**
+ * How to handle context compaction. Pi builds the summarization request
+ * internally and never routes it through `before_provider_request`, so the
+ * only safe options are to summarize redacted text ourselves or to refuse.
+ * 上下文压缩的处理方式。Pi 在内部构造摘要请求，不经过 `before_provider_request`，
+ * 因此只有两种安全选择：由本扩展对脱敏后的文本生成摘要，或直接拒绝。
+ *
+ * - `ask`: confirm each compaction, then summarize redacted text. / 每次确认后，对脱敏文本生成摘要。
+ * - `protected`: summarize redacted text without asking. / 不询问，直接对脱敏文本生成摘要。
+ * - `off`: always refuse. / 始终拒绝。
+ */
+export type CompactionMode = "ask" | "protected" | "off";
+export const COMPACTION_MODES: CompactionMode[] = ["ask", "protected", "off"];
+
 export interface Config {
   version: 1;
   sensitiveWords: Rule[];
+  compaction?: CompactionMode;
 }
 export const DEFAULT_CONFIG: Config = { version: 1, sensitiveWords: [] };
+/** Asking is the default: compaction stays visible instead of silent. / 默认询问，不让压缩静默发生。 */
+export const DEFAULT_COMPACTION: CompactionMode = "ask";
 
 export function parseConfig(raw: string): Config {
   let value: { version?: unknown; sensitiveWords?: unknown };
@@ -34,9 +51,18 @@ export function parseConfig(raw: string): Config {
       !value ||
       value.version !== 1 ||
       !Array.isArray(value.sensitiveWords) ||
-      Object.keys(value).some((k) => !["version", "sensitiveWords"].includes(k))
+      Object.keys(value).some(
+        (k) => !["version", "sensitiveWords", "compaction"].includes(k),
+      )
     )
       throw failure("CONFIG_SCHEMA");
+    if (
+      Object.hasOwn(value, "compaction") &&
+      !COMPACTION_MODES.includes(
+        (value as { compaction?: unknown }).compaction as CompactionMode,
+      )
+    )
+      throw failure("CONFIG_COMPACTION");
     if (value.sensitiveWords.length > 1000)
       throw failure("CONFIG_SIZE", { limit: 1000 });
     const definitions = new Map<string, string | undefined>();

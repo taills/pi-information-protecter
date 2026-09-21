@@ -13,6 +13,7 @@ import {
   DEFAULT_CONFIG,
   loadConfig,
   parseConfig,
+  type CompactionMode,
   type Config,
   type Rule,
 } from "./config.ts";
@@ -95,7 +96,17 @@ export function mergeConfigs(configs: Config[]): Config {
         rules.push(rule);
       }
     }
-  const raw = JSON.stringify({ version: 1, sensitiveWords: rules });
+  // Keep the strictest compaction setting across merged files: a machine that
+  // refused compaction must not start allowing it because another file asked.
+  // 合并时取最严格的压缩设置：原本拒绝压缩的机器不应因另一个文件而变为允许。
+  const modes = configs.map((config) => config.compaction);
+  // Strictest first; `undefined` means the file did not express a preference.
+  // 从严到宽；`undefined` 表示该文件未表达偏好。
+  const order: CompactionMode[] = ["off", "ask", "protected"];
+  const compaction = order.find((mode) => modes.includes(mode));
+  const merged: Config = { version: 1, sensitiveWords: rules };
+  if (compaction !== undefined) merged.compaction = compaction;
+  const raw = JSON.stringify(merged);
   if (Buffer.byteLength(raw) > 1024 * 1024)
     throw failure("CONFIG_SIZE", {
       bytes: Buffer.byteLength(raw),

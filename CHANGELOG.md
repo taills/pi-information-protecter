@@ -1,5 +1,23 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Added / 新增
+
+- Support context compaction by generating the summary from redacted text. Pi builds the summarization request internally and passes no `onPayload` callback, so `before_provider_request` never fires for it; compaction was therefore cancelled outright. The extension now redacts the messages, previous summary and custom instructions, summarizes the redacted text, and restores the summary locally before it is stored.
+  通过基于脱敏文本生成摘要来支持上下文压缩。Pi 在内部构造摘要请求且不传递 `onPayload` 回调，`before_provider_request` 对其不会触发，因此之前直接取消压缩。现在扩展会先脱敏消息、历史摘要和自定义指令，对脱敏文本生成摘要，并在保存前于本地还原。
+- Add the `compaction` configuration field: `ask` (default) confirms each compaction, `protected` summarizes without asking, and `off` always refuses. The prompt offers allow once, allow for this session, deny once and deny for this session; dismissing it denies that compaction.
+  新增 `compaction` 配置字段：`ask`（默认）每次确认，`protected` 不询问直接生成，`off` 始终拒绝。弹窗提供允许一次、本会话全部允许、拒绝一次、本会话全部拒绝；关闭对话框视为拒绝。
+- Add `COMPACT_DENIED`, `COMPACT_UNAVAILABLE`, `COMPACT_FAILED` and `CONFIG_COMPACTION` diagnostics. Any compaction failure cancels instead of falling back to Pi's unredacted summarization.
+  新增四个诊断码。压缩任何失败均取消，而不回退到 Pi 未脱敏的摘要流程。
+- Add regressions asserting that no protected value reaches the model, that the previous summary and custom instructions are redacted too, that provider errors never carry the original, and that the mode is validated and survives configuration merging.
+  新增回归：断言受保护值不会到达模型、历史摘要与自定义指令同样脱敏、提供商错误不携带原文，以及模式经校验且能在配置合并中保留。
+
+### Note / 说明
+
+- Summarized `/tree` navigation uses the same unprotected Pi path and stays cancelled.
+  带摘要的 `/tree` 导航走同一条未受保护的 Pi 路径，继续取消。
+
 ## 0.7.1 — Install the latest release by default / 默认安装最新版本
 
 ### Documentation / 文档

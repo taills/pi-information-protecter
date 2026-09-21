@@ -333,13 +333,38 @@ const UI_EN = {
   cleared: "Audit log cleared: {bytes}.",
   toolBlocked:
     "SPI Protecter blocked tool access to the protected configuration or audit log; edit it locally.",
-  compactUnsupported:
-    "SPI Protecter does not support remote context compaction yet; use /new to start a new session.",
+  compactAskTitle: "Compact this conversation?",
+  compactAskBody:
+    "Pi builds the summarization request internally and never routes it through this extension's redaction, so allowing Pi to summarize directly would send the conversation, including protected values, as plaintext.\n\nAllowing here does NOT do that: the text is redacted first, the summary is generated from the redacted text, and the summary is restored locally afterwards. The extra request costs tokens, and the model reasons about replacements, so the summary may describe protected values inaccurately.\n\nThis request will not be blocked if you allow it.",
+  compactAllowOnce: "Allow once",
+  compactAllowAlways: "Allow for this session",
+  compactDenyOnce: "Deny once",
+  compactDenyAlways: "Deny for this session",
+  compactWorking: "SPI Protecter: summarizing redacted text\u2026",
+  compactDone:
+    "SPI Protecter: compaction summary generated from redacted text.",
+  compactAlwaysNotice:
+    "SPI Protecter: compaction allowed for this session. Set \"compaction\" in the local config to make it permanent.",
+  compactDenyNotice:
+    "SPI Protecter: compaction refused for this session; use /new to start a new session.",
 };
 
 type UiKey = keyof typeof UI_EN;
 
 const UI_ZH: Record<UiKey, string> = {
+  compactAskTitle: "是否压缩当前会话？",
+  compactAskBody:
+    "Pi 在内部构造摘要请求，不经过本扩展的脱敏环节，因此直接让 Pi 生成摘要会将会话内容（包括受保护的值）以明文发送。\n\n在此处允许**不会**这样做：先对文本脱敏，再用脱敏后的内容生成摘要，最后在本地还原。这次额外请求会消耗 token；且模型推理的是替换值，摘要对受保护值的描述可能不准确。\n\n若选择允许，本次请求不会被拦截。",
+  compactAllowOnce: "允许一次",
+  compactAllowAlways: "本会话内全部允许",
+  compactDenyOnce: "拒绝一次",
+  compactDenyAlways: "本会话内全部拒绝",
+  compactWorking: "SPI Protecter：正在对脱敏内容生成摘要…",
+  compactDone: "SPI Protecter：已基于脱敏内容生成压缩摘要。",
+  compactAlwaysNotice:
+    "SPI Protecter：本会话内允许压缩。如需永久生效，请在本地配置中设置 \"compaction\"。",
+  compactDenyNotice:
+    "SPI Protecter：本会话内拒绝压缩；可使用 /new 开启新会话。",
   blockedHeader: "SPI Protecter 已阻止该请求",
   reasonLabel: "原因",
   actionLabel: "处理",
@@ -370,8 +395,6 @@ const UI_ZH: Record<UiKey, string> = {
   cleared: "已清空审计日志：{bytes}。",
   toolBlocked:
     "SPI Protecter 已阻止工具访问受保护的配置或审计日志，请在本地编辑。",
-  compactUnsupported:
-    "SPI Protecter 暂不支持远程上下文压缩，请使用 /new 开始新会话。",
 };
 
 /** Environment variables win over Intl so containers stay predictable. / 环境变量优先于 Intl，便于容器环境保持可预测。 */

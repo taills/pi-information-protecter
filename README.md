@@ -132,6 +132,38 @@ Replacements are checked so restoration stays exact: a candidate is rejected if 
 
 All notifications, prompts and diagnostics render in a single language, chosen from the environment: `PI_PROTECTER_LANG`, then `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE`, then the runtime locale. `zh*` selects Simplified Chinese; anything else falls back to English. Set `PI_PROTECTER_LANG=en` or `PI_PROTECTER_LANG=zh` to override. Error codes, stages and numeric details stay language-neutral so they can be searched and reported.
 
+### Context compaction
+
+Pi builds the summarization request inside its own compaction code and passes it straight to the provider. That request carries no `onPayload` callback, so **`before_provider_request` never fires for it** and this extension cannot redact it. Letting Pi summarize would send the stored conversation, which holds restored plaintext, to the provider in full.
+
+Instead the extension produces the summary itself:
+
+1. `preparation.messagesToSummarize`, the previous summary and any custom instructions are redacted through the same bounded worker as an outgoing request.
+2. The summary is generated from the redacted text.
+3. The summary is restored locally before it is stored, exactly like assistant text; the next outgoing request redacts it again.
+
+Any failure cancels compaction rather than falling back to Pi's unredacted path, and reports `COMPACT_UNAVAILABLE` (no model or no resolved credentials) or `COMPACT_FAILED`.
+
+Set `compaction` in the local configuration:
+
+| Value | Behaviour |
+| --- | --- |
+| `ask` (default) | Confirm each compaction, then summarize redacted text |
+| `protected` | Summarize redacted text without asking |
+| `off` | Always refuse; use `/new` for long sessions |
+
+```json
+{
+  "version": 1,
+  "compaction": "protected",
+  "sensitiveWords": []
+}
+```
+
+The prompt offers allow once, allow for this session, deny once and deny for this session. A session choice lasts until reload or exit; `compaction` in the configuration is the permanent setting. Dismissing the dialog denies that compaction.
+
+Two costs are unavoidable: the extra summarization request consumes tokens, and the model reasons about replacements, so the summary can describe protected values inaccurately. Summarized `/tree` navigation uses the same unprotected Pi path and is still cancelled.
+
 ### Multi-turn consistency and prompt caching
 
 Random placeholders are generated once per exact original and reused within the same extension instance, including after local response restoration. Starting another scan worker does not reset the mapping. This supports stable prompt prefixes but does not guarantee provider KV-cache hits; model, tools, message ordering, cache lifetime and routing also matter. `/reload`, process restart and session-instance replacement clear mappings. Different processes do not share mappings, and audit timestamps/request IDs are never included in the model payload.
@@ -198,7 +230,7 @@ Local response and tool-argument restoration
 ## Limitations — read first
 
 - Only rule-matching text is protected, not paraphrases, split characters or arbitrary encodings. Common image/audio/video/file blocks reject the entire request because SPI cannot be reliably inspected; no OCR is provided.
-- `/compact`, automatic compaction and summarized `/tree` navigation are cancelled pending separate lifecycle/restoration verification. Tree navigation without summaries works; use `/new` for long sessions.
+- Compaction summarizes redacted text locally, because Pi builds the summarization request internally and never routes it through `before_provider_request`. Summarized `/tree` navigation still takes that unprotected path and stays cancelled; navigation without summaries works. See [Context compaction](#context-compaction).
 - Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
 - Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
 - Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
@@ -355,6 +387,38 @@ pi update npm:pi-information-protecter
 
 所有通知、提示和诊断仅以**单一语言**呈现，语言按环境变量依次选取：`PI_PROTECTER_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`，最后是运行时区域。`zh*` 选择简体中文，其余回退英文。可设置 `PI_PROTECTER_LANG=en` 或 `PI_PROTECTER_LANG=zh` 覆盖。错误码、阶段和数值细节保持语言无关，便于搜索和反馈。
 
+### 上下文压缩
+
+Pi 在自己的压缩代码中构造摘要请求并直接发给提供商。该请求不携带 `onPayload` 回调，因此 **`before_provider_request` 根本不会触发**，本扩展无法对其脱敏。直接交给 Pi 生成摘要，等于把存有还原明文的会话内容完整发给提供商。
+
+因此改由扩展自行生成摘要：
+
+1. 将 `preparation.messagesToSummarize`、历史摘要和自定义指令，通过与出站请求相同的限时 worker 脱敏。
+2. 基于脱敏后的文本生成摘要。
+3. 摘要在保存前于本地还原，与助手文本一致；下一次出站请求会再次脱敏。
+
+任何失败都取消压缩，而不回退到 Pi 未脱敏的路径，并报出 `COMPACT_UNAVAILABLE`（无可用模型或无法获取凭证）或 `COMPACT_FAILED`。
+
+在本地配置中设置 `compaction`：
+
+| 取值 | 行为 |
+| --- | --- |
+| `ask`（默认） | 每次压缩先确认，再对脱敏文本生成摘要 |
+| `protected` | 不询问，直接对脱敏文本生成摘要 |
+| `off` | 始终拒绝；长会话请使用 `/new` |
+
+```json
+{
+  "version": 1,
+  "compaction": "protected",
+  "sensitiveWords": []
+}
+```
+
+弹窗提供四个选项：允许一次、本会话内全部允许、拒绝一次、本会话内全部拒绝。会话级选择在重载或退出前有效；配置中的 `compaction` 才是永久设置。关闭对话框视为拒绝本次压缩。
+
+有两项代价无法避免：额外的摘要请求会消耗 token；模型推理的是替换值，摘要对受保护值的描述可能不准确。带摘要的 `/tree` 导航走同一条未受保护的 Pi 路径，仍然取消。
+
 ### 多轮一致性与提示词缓存
 
 随机占位符按精确原文首次生成，在同一扩展实例内持续复用，包括本地回复还原后的再次脱敏；新建扫描 worker 不会重置映射。这有助于前缀稳定，但不保证提供商 KV Cache 命中，模型、工具、消息顺序、缓存有效期和路由也有影响。重载、进程重启和会话实例替换会清除映射；不同进程不共享映射，审计时间和请求 ID 不进入模型请求体。
@@ -421,7 +485,7 @@ before_provider_request：最终 JSON 文本扫描
 ## 当前限制——请先阅读
 
 - 仅保护命中规则的文本，不覆盖改写、拆字和任意编码。常见多模态附件因无法可靠审查而拒绝整个请求，不提供 OCR。
-- 暂时取消压缩和带摘要的树导航，等待单独验证生命周期及还原；不带摘要的导航可用，长会话请使用 `/new`。
+- 压缩改为在本地对脱敏文本生成摘要，因为 Pi 在内部构造摘要请求，不经过 `before_provider_request`。带摘要的 `/tree` 导航仍走那条未受保护的路径，继续取消；不带摘要的导航可用。参见[上下文压缩](#上下文压缩)。
 - 退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
 - 过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
 - 复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。

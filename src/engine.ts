@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { migrateConfig, type Snapshot } from "./migration.ts";
 import { getMachineHash } from "./machine.ts";
 import { appendAudit, clearAudit, readAudit } from "./audit.ts";
+import { DEFAULT_COMPACTION, type CompactionMode } from "./config.ts";
 import {
   failure,
   formatDiagnostic,
@@ -75,6 +76,10 @@ export class Protecter {
   }
   get ruleCount(): number {
     return this.snapshot?.config.sensitiveWords.length ?? 0;
+  }
+  /** Compaction handling from the local config; asking is the default. / 来自本地配置的压缩处理方式，默认询问。 */
+  get compactionMode(): CompactionMode {
+    return this.snapshot?.config.compaction ?? DEFAULT_COMPACTION;
   }
   get ready(): boolean {
     return !!this.snapshot && !this.closed;
