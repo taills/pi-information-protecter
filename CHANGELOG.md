@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.8.0 — Protected summarization / 受保护的摘要生成
 
 ### Added / 新增
 
@@ -13,10 +13,8 @@
 - Add regressions asserting that no protected value reaches the model, that the previous summary and custom instructions are redacted too, that provider errors never carry the original, and that the mode is validated and survives configuration merging.
   新增回归：断言受保护值不会到达模型、历史摘要与自定义指令同样脱敏、提供商错误不携带原文，以及模式经校验且能在配置合并中保留。
 
-### Note / 说明
-
-- Summarized `/tree` navigation uses the same unprotected Pi path and stays cancelled.
-  带摘要的 `/tree` 导航走同一条未受保护的 Pi 路径，继续取消。
+- Protect summarized `/tree` navigation the same way, from redacted session entries, sharing the `compaction` setting and the same prompt. Navigation without a summary sends nothing and is never gated.
+  以同样方式保护带摘要的 `/tree` 导航：基于脱敏后的会话条目生成，并共用 `compaction` 设置与同一弹窗。不生成摘要的导航不发送任何内容，也不会被拦截。
 
 ## 0.7.1 — Install the latest release by default / 默认安装最新版本
 

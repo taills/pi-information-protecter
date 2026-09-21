@@ -4,7 +4,12 @@ import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Protecter } from "../src/engine.ts";
-import { buildProtectedSummary, type Summarizer } from "../src/compaction.ts";
+import {
+  buildProtectedBranchSummary,
+  buildProtectedSummary,
+  type BranchSummarizer,
+  type Summarizer,
+} from "../src/compaction.ts";
 import { parseConfig, DEFAULT_COMPACTION } from "../src/config.ts";
 import { type Rule } from "../src/config.ts";
 
@@ -229,6 +234,106 @@ test("a provider error never leaks the original / 提供商错误不泄漏原文
   ).catch((e: Error) => e);
   const text = String((error as Error).message);
   for (const secret of SECRETS) assert.ok(!text.includes(secret), secret);
+});
+
+test("branch summaries are redacted too / 分支摘要同样脱敏", async (t) => {
+  const engine = await engineWith(t);
+  const entries = [
+    { type: "message", id: "a", message: { role: "user", content: "张三 13800138000" } },
+    { type: "message", id: "b", message: { role: "assistant", content: "key sk-live-abcdefgh" } },
+  ];
+  let seen: unknown;
+  let seenOptions: Record<string, unknown> | undefined;
+  const summarize = (async (input: unknown, options: Record<string, unknown>) => {
+    seen = input;
+    seenOptions = options;
+    return { summary: "branch summary", usage: { totalTokens: 3 } };
+  }) as unknown as BranchSummarizer;
+
+  const result = await buildProtectedBranchSummary(
+    {
+      type: "session_before_tree",
+      preparation: {
+        targetId: "t",
+        oldLeafId: null,
+        commonAncestorId: null,
+        entriesToSummarize: entries,
+        userWantsSummary: true,
+        customInstructions: "keep 张三 details",
+        replaceInstructions: true,
+      },
+      signal: new AbortController().signal,
+    } as never,
+    fixtureCtx(),
+    engine,
+    "demo",
+    summarize,
+  );
+
+  const sent = JSON.stringify(seen);
+  for (const secret of SECRETS)
+    assert.ok(!sent.includes(secret), `leaked: ${secret}`);
+  // Entry structure must survive so the summarizer still understands it.
+  // 条目结构必须保留，摘要函数才能理解。
+  assert.equal(JSON.parse(sent).length, 2);
+  assert.equal(JSON.parse(sent)[0].type, "message");
+  assert.ok(!String(seenOptions?.customInstructions).includes("张三"));
+  assert.equal(seenOptions?.replaceInstructions, true);
+  assert.equal(result.summary, "branch summary");
+  assert.deepEqual(result.usage, { totalTokens: 3 });
+});
+
+test("branch summaries fail closed / 分支摘要失败时拒绝放行", async (t) => {
+  const engine = await engineWith(t);
+  const event = {
+    type: "session_before_tree",
+    preparation: {
+      targetId: "t",
+      oldLeafId: null,
+      commonAncestorId: null,
+      entriesToSummarize: [{ type: "message", message: { content: "13800138000" } }],
+      userWantsSummary: true,
+    },
+    signal: new AbortController().signal,
+  } as never;
+  assert.equal(
+    await codeOf(
+      buildProtectedBranchSummary(
+        event,
+        fixtureCtx({ model: undefined }),
+        engine,
+        "demo",
+        (async () => ({ summary: "x" })) as unknown as BranchSummarizer,
+      ),
+    ),
+    "COMPACT_UNAVAILABLE",
+  );
+  assert.equal(
+    await codeOf(
+      buildProtectedBranchSummary(
+        event,
+        fixtureCtx(),
+        engine,
+        "demo",
+        (async () => {
+          throw new Error("boom 13800138000");
+        }) as unknown as BranchSummarizer,
+      ),
+    ),
+    "COMPACT_FAILED",
+  );
+  assert.equal(
+    await codeOf(
+      buildProtectedBranchSummary(
+        event,
+        fixtureCtx(),
+        engine,
+        "demo",
+        (async () => ({ summary: "  " })) as unknown as BranchSummarizer,
+      ),
+    ),
+    "COMPACT_FAILED",
+  );
 });
 
 test("compaction mode is configurable and validated / 压缩模式可配置且经校验", async (t) => {

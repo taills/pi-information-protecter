@@ -1,8 +1,10 @@
 import {
+  generateBranchSummary,
   generateSummaryWithUsage,
   type CompactionResult,
   type ExtensionContext,
   type SessionBeforeCompactEvent,
+  type SessionBeforeTreeEvent,
 } from "@earendil-works/pi-coding-agent";
 import { failure } from "./diagnostics.ts";
 
@@ -22,6 +24,33 @@ export interface SummaryEngine {
 
 /** Injected so tests can assert that only redacted text reaches the model. / 可注入，以便测试断言只有脱敏文本会到达模型。 */
 export type Summarizer = typeof generateSummaryWithUsage;
+export type BranchSummarizer = typeof generateBranchSummary;
+
+/**
+ * Resolve request credentials without surfacing provider or key details.
+ * 获取请求凭证，不暴露提供商或密钥细节。
+ */
+async function resolveAuth(ctx: ExtensionContext) {
+  const model = ctx.model;
+  if (!model) throw failure("COMPACT_UNAVAILABLE");
+  let auth: Awaited<
+    ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>
+  >;
+  try {
+    auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
+  } catch {
+    throw failure("COMPACT_UNAVAILABLE");
+  }
+  if (!auth.ok) throw failure("COMPACT_UNAVAILABLE");
+  // A null header value means "remove"; summarization takes plain strings.
+  // 值为 null 表示删除该头，而摘要接口只接受字符串。
+  const headers = Object.fromEntries(
+    Object.entries(auth.headers ?? {}).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  return { model, apiKey: auth.apiKey, headers, env: auth.env };
+}
 
 /**
  * Build a compaction summary without ever sending protected values.
@@ -37,8 +66,6 @@ export async function buildProtectedSummary(
   provider: string,
   summarize: Summarizer = generateSummaryWithUsage,
 ): Promise<CompactionResult> {
-  const model = ctx.model;
-  if (!model) throw failure("COMPACT_UNAVAILABLE");
   const { preparation } = event;
 
   // Redaction runs through the same bounded worker as an outgoing request.
@@ -59,33 +86,17 @@ export async function buildProtectedSummary(
       ? undefined
       : ((await engine.redact(event.customInstructions, provider)) as string);
 
-  let auth: Awaited<
-    ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>
-  >;
-  try {
-    auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  } catch {
-    // Never surface provider or key details. / 不暴露提供商或密钥细节。
-    throw failure("COMPACT_UNAVAILABLE");
-  }
-  if (!auth.ok) throw failure("COMPACT_UNAVAILABLE");
-  // A null header value means "remove"; summarization takes plain strings.
-  // 值为 null 表示删除该头，而摘要接口只接受字符串。
-  const headers = Object.fromEntries(
-    Object.entries(auth.headers ?? {}).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
+  const auth = await resolveAuth(ctx);
 
   let text: string;
   let usage: CompactionResult["usage"];
   try {
     const result = await summarize(
       redacted,
-      model,
+      auth.model,
       preparation.settings.reserveTokens,
       auth.apiKey,
-      headers,
+      auth.headers,
       event.signal,
       instructions,
       previous,
@@ -109,4 +120,56 @@ export async function buildProtectedSummary(
     tokensBefore: preparation.tokensBefore,
     usage,
   };
+}
+
+export interface ProtectedBranchSummary {
+  summary: string;
+  usage?: Awaited<ReturnType<BranchSummarizer>>["usage"];
+}
+
+/**
+ * Branch summaries for `/tree` take the same internal path as compaction, so
+ * they are produced here from redacted entries for the same reason.
+ * `/tree` 的分支摘要走与压缩相同的内部路径，因此同样在此处基于脱敏条目生成。
+ */
+export async function buildProtectedBranchSummary(
+  event: SessionBeforeTreeEvent,
+  ctx: ExtensionContext,
+  engine: SummaryEngine,
+  provider: string,
+  summarize: BranchSummarizer = generateBranchSummary,
+): Promise<ProtectedBranchSummary> {
+  const { preparation } = event;
+  // Session entries are ordinary JSON, so the same scan covers them.
+  // 会话条目是普通 JSON，同一扫描即可覆盖。
+  const redacted = (await engine.redact(
+    preparation.entriesToSummarize,
+    provider,
+  )) as typeof preparation.entriesToSummarize;
+  const instructions =
+    preparation.customInstructions === undefined
+      ? undefined
+      : ((await engine.redact(
+          preparation.customInstructions,
+          provider,
+        )) as string);
+  const auth = await resolveAuth(ctx);
+
+  let result: Awaited<ReturnType<BranchSummarizer>>;
+  try {
+    result = await summarize(redacted, {
+      model: auth.model,
+      apiKey: auth.apiKey,
+      headers: auth.headers,
+      env: auth.env,
+      signal: event.signal,
+      customInstructions: instructions,
+      replaceInstructions: preparation.replaceInstructions,
+    });
+  } catch {
+    throw failure("COMPACT_FAILED");
+  }
+  const text = result?.summary;
+  if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");
+  return { summary: engine.restoreText(text), usage: result.usage };
 }

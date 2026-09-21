@@ -2,11 +2,15 @@ import {
   getAgentDir,
   VERSION,
   type ExtensionAPI,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Protecter } from "./engine.ts";
 import { supportsPi } from "./compat.ts";
 import { blocksConfigAccess } from "./guard.ts";
-import { buildProtectedSummary } from "./compaction.ts";
+import {
+  buildProtectedBranchSummary,
+  buildProtectedSummary,
+} from "./compaction.ts";
 import {
   failure,
   formatDiagnostic,
@@ -154,38 +158,49 @@ export default function informationProtecter(pi: ExtensionAPI): void {
    * Pi 在内部生成摘要且不经过 `before_provider_request`，直接交给它会把存有还原明文的
    * 会话内容发给提供商。此处改为对脱敏文本生成摘要，任何失败均取消。
    */
-  pi.on("session_before_compact", async (event, ctx) => {
-    try {
-      if (!compatible) throw failure("UNSUPPORTED_PI");
-      if (!engine.ready) throw engine.lastDiagnostic
+  /**
+   * Shared gate for both summarization paths; throws when this one must not run.
+   * 两条摘要路径共用的关口，不应执行时抛出。
+   */
+  const allowSummarization = async (
+    ctx: Pick<ExtensionContext, "ui">,
+    signal: AbortSignal,
+  ) => {
+    if (!compatible) throw failure("UNSUPPORTED_PI");
+    if (!engine.ready)
+      throw engine.lastDiagnostic
         ? failure(engine.lastDiagnostic.code, engine.lastDiagnostic)
         : failure("NOT_READY");
-      const mode = engine.compactionMode;
-      if (mode === "off") throw failure("COMPACT_DENIED");
-      if (mode === "ask" && compactChoice === undefined) {
-        const options = [
-          t("compactAllowOnce"),
-          t("compactAllowAlways"),
-          t("compactDenyOnce"),
-          t("compactDenyAlways"),
-        ];
-        const picked = await ctx.ui.select(
-          `${t("compactAskTitle")}\n\n${t("compactAskBody")}`,
-          options,
-          { signal: event.signal },
-        );
-        const index = picked === undefined ? -1 : options.indexOf(picked);
-        // Dismissing the dialog denies this compaction. / 关闭对话框视为拒绝本次压缩。
-        if (index === 1) {
-          compactChoice = "allow";
-          ctx.ui.notify(t("compactAlwaysNotice"), "info");
-        } else if (index === 3) {
-          compactChoice = "deny";
-          ctx.ui.notify(t("compactDenyNotice"), "warning");
-        }
-        if (index !== 0 && index !== 1) throw failure("COMPACT_DENIED");
-      }
-      if (compactChoice === "deny") throw failure("COMPACT_DENIED");
+    const mode = engine.compactionMode;
+    if (mode === "off") throw failure("COMPACT_DENIED");
+    if (compactChoice === "deny") throw failure("COMPACT_DENIED");
+    if (mode !== "ask" || compactChoice === "allow") return;
+    const options = [
+      t("compactAllowOnce"),
+      t("compactAllowAlways"),
+      t("compactDenyOnce"),
+      t("compactDenyAlways"),
+    ];
+    const picked = await ctx.ui.select(
+      `${t("compactAskTitle")}\n\n${t("compactAskBody")}`,
+      options,
+      { signal },
+    );
+    const index = picked === undefined ? -1 : options.indexOf(picked);
+    // Dismissing the dialog denies this run. / 关闭对话框视为拒绝本次。
+    if (index === 1) {
+      compactChoice = "allow";
+      ctx.ui.notify(t("compactAlwaysNotice"), "info");
+    } else if (index === 3) {
+      compactChoice = "deny";
+      ctx.ui.notify(t("compactDenyNotice"), "warning");
+    }
+    if (index !== 0 && index !== 1) throw failure("COMPACT_DENIED");
+  };
+
+  pi.on("session_before_compact", async (event, ctx) => {
+    try {
+      await allowSummarization(ctx, event.signal);
       ctx.ui.notify(t("compactWorking"), "info");
       const summary = await buildProtectedSummary(
         event,
@@ -205,11 +220,31 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       return { cancel: true };
     }
   });
-  // Tree summaries take the same unprotected path and are not covered yet.
-  // 树摘要走同样未受保护的路径，目前尚未覆盖。
-  pi.on("session_before_tree", (event) =>
-    event.preparation.userWantsSummary ? { cancel: true } : undefined,
-  );
+
+  // Branch summaries take the same internal path, so they are produced here too.
+  // 分支摘要走同一内部路径，因此同样在此处生成。
+  pi.on("session_before_tree", async (event, ctx) => {
+    // Navigation without a summary sends nothing. / 不生成摘要的导航不发送内容。
+    if (!event.preparation.userWantsSummary) return undefined;
+    try {
+      await allowSummarization(ctx, event.signal);
+      ctx.ui.notify(t("compactWorking"), "info");
+      const summary = await buildProtectedBranchSummary(
+        event,
+        ctx,
+        engine,
+        ctx.model?.provider ?? "unknown",
+      );
+      ctx.ui.notify(t("compactDone"), "info");
+      return { summary };
+    } catch (error) {
+      ctx.ui.notify(
+        record(sanitizeError(error, "COMPACT_FAILED").diagnostic),
+        "warning",
+      );
+      return { cancel: true };
+    }
+  });
 
   pi.registerCommand("protecter", {
     description: t("commandDescription"),

@@ -162,7 +162,9 @@ Set `compaction` in the local configuration:
 
 The prompt offers allow once, allow for this session, deny once and deny for this session. A session choice lasts until reload or exit; `compaction` in the configuration is the permanent setting. Dismissing the dialog denies that compaction.
 
-Two costs are unavoidable: the extra summarization request consumes tokens, and the model reasons about replacements, so the summary can describe protected values inaccurately. Summarized `/tree` navigation uses the same unprotected Pi path and is still cancelled.
+Two costs are unavoidable: the extra summarization request consumes tokens, and the model reasons about replacements, so the summary can describe protected values inaccurately.
+
+Summarized `/tree` navigation takes the same internal Pi path and is protected the same way, using the same setting and prompt. Navigation without a summary sends nothing and is never gated.
 
 ### Multi-turn consistency and prompt caching
 
@@ -230,7 +232,7 @@ Local response and tool-argument restoration
 ## Limitations — read first
 
 - Only rule-matching text is protected, not paraphrases, split characters or arbitrary encodings. Common image/audio/video/file blocks reject the entire request because SPI cannot be reliably inspected; no OCR is provided.
-- Compaction summarizes redacted text locally, because Pi builds the summarization request internally and never routes it through `before_provider_request`. Summarized `/tree` navigation still takes that unprotected path and stays cancelled; navigation without summaries works. See [Context compaction](#context-compaction).
+- Compaction and summarized `/tree` navigation summarize redacted text locally, because Pi builds those requests internally and never routes them through `before_provider_request`. Navigation without summaries sends nothing. See [Context compaction](#context-compaction).
 - Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
 - Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
 - Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
@@ -417,7 +419,9 @@ Pi 在自己的压缩代码中构造摘要请求并直接发给提供商。该�
 
 弹窗提供四个选项：允许一次、本会话内全部允许、拒绝一次、本会话内全部拒绝。会话级选择在重载或退出前有效；配置中的 `compaction` 才是永久设置。关闭对话框视为拒绝本次压缩。
 
-有两项代价无法避免：额外的摘要请求会消耗 token；模型推理的是替换值，摘要对受保护值的描述可能不准确。带摘要的 `/tree` 导航走同一条未受保护的 Pi 路径，仍然取消。
+有两项代价无法避免：额外的摘要请求会消耗 token；模型推理的是替换值，摘要对受保护值的描述可能不准确。
+
+带摘要的 `/tree` 导航走同一条内部路径，采用相同保护方式，并共用同一设置与弹窗。不生成摘要的导航不发送任何内容，也不会被拦截。
 
 ### 多轮一致性与提示词缓存
 
@@ -485,7 +489,7 @@ before_provider_request：最终 JSON 文本扫描
 ## 当前限制——请先阅读
 
 - 仅保护命中规则的文本，不覆盖改写、拆字和任意编码。常见多模态附件因无法可靠审查而拒绝整个请求，不提供 OCR。
-- 压缩改为在本地对脱敏文本生成摘要，因为 Pi 在内部构造摘要请求，不经过 `before_provider_request`。带摘要的 `/tree` 导航仍走那条未受保护的路径，继续取消；不带摘要的导航可用。参见[上下文压缩](#上下文压缩)。
+- 压缩与带摘要的 `/tree` 导航均改为在本地对脱敏文本生成摘要，因为 Pi 在内部构造这些请求，不经过 `before_provider_request`。不带摘要的导航不发送任何内容。参见[上下文压缩](#上下文压缩)。
 - 退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
 - 过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
 - 复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。
