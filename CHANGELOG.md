@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.6.3 — Conversations no longer block after a rule learns a value / 规则学习到值后不再拦截会话
 
 ### Fixed / 修复
 
