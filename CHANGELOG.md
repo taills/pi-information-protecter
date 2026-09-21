@@ -10,6 +10,8 @@
   在整个数值上下文中判断候选值，并保持指数位、多位整数部分的首位和小数部分的末位在结构上有效。
 - Restore redacted numbers as numbers. Since 0.6.0 a numeric field keeps its JSON type, but restoration only walked strings, so a numeric tool argument was executed with the replacement value instead of the original.
   脱敏后的数字以数字还原。0.6.0 起数值字段保持 JSON 类型，但还原只遍历字符串，导致数值类工具参数会以替换值而非原值执行。
+- Give a digit run an integer-safe shape even in text, so a value that appears both as a string and as a JSON number can share one mapping. A text shape could start with a leading zero, which the number form then rejected. Long digit strings beyond the safe-integer range keep working, because the range cap applies only to numeric fields.
+  纯数字串即使在文本中也使用整数安全的形状，使同时以字符串和 JSON 数字出现的值共用一份映射。文本形状可能以前导零开头，而数字形式会拒绝。超出安全整数范围的长数字串仍可使用，因为范围限制仅适用于数值字段。
 - Add a regression that repeatedly redacts decimals and exponents and asserts every field stays a finite JSON number.
   新增回归：反复脱敏小数与指数，断言每个字段仍为有限的 JSON 数字。
 - Add a regression asserting that one value maps to one replacement across strings, object keys, numbers, nested structures and JSON-encoded tool arguments in the same request.

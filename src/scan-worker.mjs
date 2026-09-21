@@ -66,9 +66,14 @@ try {
   function generate(original, numeric, accepts) {
     for (let attempt = 0; attempt < 64; attempt++) {
       let candidate;
-      if (!numeric) candidate = reshapeValue(original);
-      else if (/^\d+$/.test(original)) candidate = reshapeInteger(original);
-      else candidate = reshapeNumericPart(original);
+      // A digit run gets an integer-safe shape even in text, because the same
+      // value may also appear as a JSON number and must reuse this mapping.
+      // 纯数字串即使在文本中也使用整数安全的形状，因为同一值可能也以 JSON
+      // 数字出现并复用该映射。
+      if (/^\d+$/.test(original))
+        candidate = reshapeInteger(original, numeric);
+      else if (numeric) candidate = reshapeNumericPart(original);
+      else candidate = reshapeValue(original);
       if (!candidate || candidate === original) continue;
       // Reject values already meaningful elsewhere, so restoration stays exact.
       // 拒绝已在别处出现的值，确保还原精确。

@@ -138,10 +138,14 @@ export function reshapeValue(text) {
 }
 
 /**
- * Same digit count, no leading-zero change, always a safe integer.
- * 位数一致、不改变前导零、始终保持安全整数。
+ * Same digit count and no leading-zero change, so the value stays valid both
+ * as text and as a JSON number. `safe` additionally caps the result at
+ * `Number.MAX_SAFE_INTEGER`, which only a numeric field requires; capping a
+ * long digit string would otherwise leave no candidate at all.
+ * 位数一致且不改变前导零，使值在文本和 JSON 数字两种上下文都有效。
+ * `safe` 额外限制在安全整数范围内，仅数值字段需要；对长数字串限制会导致无候选值。
  */
-export function reshapeInteger(digits) {
+export function reshapeInteger(digits, safe = true) {
   if (!/^\d+$/.test(digits)) return undefined;
   // A lone digit keeps its zero-ness so a leading zero never appears.
   // 单个数字保持是否为零，避免产生前导零。
@@ -156,7 +160,7 @@ export function reshapeInteger(digits) {
   }
   const low = 10n ** BigInt(digits.length - 1);
   const high = 10n ** BigInt(digits.length) - 1n;
-  const bound = high > MAX_SAFE ? MAX_SAFE : high;
+  const bound = safe && high > MAX_SAFE ? MAX_SAFE : high;
   if (bound < low) return undefined;
   return String(low + randomBelow(bound - low + 1n));
 }

@@ -192,17 +192,21 @@ test("exhausted and unsafe shapes fail closed / 无可用形状或数值不安�
     "SCAN_UNIQUE_FAILED",
   );
 
-  // A mapping first made for text is reused for the number, and text shapes
-  // carry letters, so the number can no longer round-trip and must fail closed.
-  // 先在文本上下文建立的映射会被数值复用，而文本形状含字母，数值因此无法往返，必须拒绝放行。
-  const shared = await fixture(t, ["1.5e-7"]);
-  const code = await codeOf(
-    shared.engine.redact({ text: "value 1.5e-7 here", number: 1.5e-7 }),
+  // A fixed alias is text by definition, so it can never stand in for a
+  // numeric field; sending a string there would break the provider schema.
+  // 固定别名本质上是文本，无法代替数值字段，否则会破坏提供商结构。
+  const alias = await fixture(t, [
+    { type: "literal", value: "123456", replacement: "SECRET-ID" },
+  ]);
+  assert.equal(
+    await codeOf(alias.engine.redact({ account: 123456 })),
+    "SCAN_NUMBER_UNSAFE",
   );
-  assert.ok(
-    ["SCAN_NUMBER_UNSAFE", "SCAN_UNIQUE_FAILED"].includes(code),
-    `unexpected code: ${code}`,
-  );
+  // The same alias stays usable for the text form. / 同一别名在文本形式下仍可用。
+  const text = await fixture(t, [
+    { type: "literal", value: "123456", replacement: "SECRET-ID" },
+  ]);
+  assert.equal(await text.engine.redact("id 123456"), "id SECRET-ID");
 });
 
 test("one value maps to one replacement everywhere / 同一值在各处替换为同一值", async (t) => {
