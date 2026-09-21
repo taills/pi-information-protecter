@@ -13,7 +13,7 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Protection is not initialized",
     "Run /protecter status for the initialization error, fix it, then /reload",
   ],
-  UNSUPPORTED_PI: ["Unsupported Pi version", "Use Pi 0.85.1-0.85.x"],
+  UNSUPPORTED_PI: ["Unsupported Pi version", "Use Pi 0.85.1-0.86.x"],
   MACHINE_ID: [
     "Machine identifier unavailable",
     "Check local OS machine-ID access; no random fallback is used",
@@ -195,7 +195,7 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
 const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
   INTERNAL: ["未预期的本地错误", "重载并检查安装包完整性"],
   NOT_READY: ["防护尚未初始化", "查看初始化错误，修复后重载"],
-  UNSUPPORTED_PI: ["Pi 版本不受支持", "请使用受支持的 Pi 版本"],
+  UNSUPPORTED_PI: ["Pi 版本不受支持", "请使用 Pi 0.85.1-0.86.x"],
   MACHINE_ID: ["无法获取机器标识", "检查系统机器标识访问权限，不使用随机回退"],
   CONFIG_JSON: ["配置 JSON 无效", "本地修复 JSON 语法后重载"],
   CONFIG_SCHEMA: [

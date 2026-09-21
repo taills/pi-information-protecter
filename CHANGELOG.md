@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Fixed / 修复
+
+- Correct the `UNSUPPORTED_PI` message, which still named 0.85.x only after 0.86 support was added in 0.6.4. The version gate itself was already correct, so only the advice text was wrong.
+  修正 `UNSUPPORTED_PI` 文案：0.6.4 已支持 0.86，但提示仍只写 0.85.x。版本门禁本身正确，仅建议文案有误。
+
 ## 0.6.4 — Pi 0.86 support / 支持 Pi 0.86
 
 ### Added / 新增
