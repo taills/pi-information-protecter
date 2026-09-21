@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Documentation / 文档
+
+- Install with an unpinned spec by default. The example pinned `@0.5.0`, so anyone copying it installed a release missing every later fix. Document the pinned form as the deliberate choice and add the upgrade command.
+  默认使用不带版本号的安装命令。此前示例固定在 `@0.5.0`，照抄的用户会装到缺少后续全部修复的版本。固定版本改为需显式选择，并补充升级命令。
+
 ## 0.7.0 — Verified Pi compatibility range / 经验证的 Pi 兼容范围
 
 ### Changed / 变更

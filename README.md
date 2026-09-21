@@ -13,8 +13,11 @@ A Pi extension that inspects outgoing LLM request bodies locally, replaces confi
 Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x or 0.85.1–0.87.x**. Every accepted release was verified by running the full suite, including the real loader and worker integration tests. 0.83.0 and earlier lack `registerMarkdownTransformer`, and 0.85.0 imports `@earendil-works/pi-server`, which no Pi release declares, so both fail to load. Legacy `@mariozechner/*` releases are not supported.
 
 ```bash
-# Install the pinned npm release.
-pi install npm:pi-information-protecter@0.5.0
+# Install the latest npm release.
+pi install npm:pi-information-protecter
+
+# Pin a version only when you have a reason to; older releases miss fixes.
+pi install npm:pi-information-protecter@0.7.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -23,9 +26,12 @@ pi install "$PWD"
 
 # Load for one invocation.
 pi -e ./src/index.ts
+
+# Upgrade an existing installation.
+pi update npm:pi-information-protecter
 ```
 
-Run `/reload` in an existing Pi session. Starting with `0.2.1`, npm releases ship compiled, minified ESM in `dist/`, not TypeScript source. Keep all three files together: `index.mjs`, `scan-worker.mjs` and `validate-worker.mjs`. Version `0.2.0` uses the previous source layout.
+An unpinned spec installs the latest release; a pinned one stays on that version until you update it. Run `/reload` in an existing Pi session. Starting with `0.2.1`, npm releases ship compiled, minified ESM in `dist/`, not TypeScript source. Keep all three files together: `index.mjs`, `scan-worker.mjs` and `validate-worker.mjs`. Version `0.2.0` uses the previous source layout.
 
 See [CHANGELOG.md](CHANGELOG.md) for version changes. Contribution and release instructions are in the repository's `CONTRIBUTING.md` and `docs/RELEASING.md`.
 
@@ -228,8 +234,11 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.84.0–0.84.x 或 0.85.1–0.87.x**。每个受支持版本都经过完整测试验证（含真实加载器与 worker 集成测试）。0.83.0 及更早缺少 `registerMarkdownTransformer`，0.85.0 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`，两者均无法加载。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
-# 安装固定 npm 版本。
-pi install npm:pi-information-protecter@0.5.0
+# 安装最新 npm 版本。
+pi install npm:pi-information-protecter
+
+# 确有需要时才固定版本；旧版本缺少后续修复。
+pi install npm:pi-information-protecter@0.7.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -238,7 +247,12 @@ pi install "$PWD"
 
 # 单次加载。
 pi -e ./src/index.ts
+
+# 升级已安装的版本。
+pi update npm:pi-information-protecter
 ```
+
+不带版本号安装最新版；固定版本后将停留在该版本，直到手动更新。
 
 已运行的 Pi 请执行 `/reload`。从 `0.2.1` 起，npm 发布 `dist/` 中编译压缩后的 ESM，而非 TypeScript 源码。必须同时保留 `index.mjs`、`scan-worker.mjs` 和 `validate-worker.mjs` 三个文件。`0.2.0` 采用旧源码布局。
 
