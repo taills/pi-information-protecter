@@ -70,8 +70,7 @@ try {
       // value may also appear as a JSON number and must reuse this mapping.
       // 纯数字串即使在文本中也使用整数安全的形状，因为同一值可能也以 JSON
       // 数字出现并复用该映射。
-      if (/^\d+$/.test(original))
-        candidate = reshapeInteger(original, numeric);
+      if (/^\d+$/.test(original)) candidate = reshapeInteger(original, numeric);
       else if (numeric) candidate = reshapeNumericPart(original);
       else candidate = reshapeValue(original);
       if (!candidate || candidate === original) continue;
@@ -211,8 +210,12 @@ try {
     const protectedSpans = [...text.matchAll(pattern)].filter((match) =>
       tokenToOriginal.has(match[0]),
     );
-    // Reject regex matches crossing a fixed alias; splitting must not hide secrets.
-    // 拒绝跨固定别名的正则匹配，避免文本切分隐藏敏感值。
+    // Reject only regex matches straddling a replacement boundary; splitting
+    // must not hide secrets. A match that is, or sits inside, an existing
+    // replacement is expected once replacements keep the shape of what the
+    // rule matches, and is simply skipped below.
+    // 仅拒绝跨越替换值边界的正则匹配，避免文本切分隐藏敏感值。当替换值与规则所匹配
+    // 的内容同形时，匹配到替换值本身或其内部属于预期情况，下方直接跳过。
     for (const matcher of matchers) {
       if (!matcher.regex || !fixedTokens.length) continue;
       activeRule = matcher.rule;
@@ -220,13 +223,15 @@ try {
       for (const hit of text.matchAll(matcher.regex)) {
         if (++matches > 100000) fail("SCAN_MATCH_LIMIT");
         if (!hit[0].length) fail("SCAN_ZERO_WIDTH");
+        const hitStart = hit.index;
+        const hitEnd = hit.index + hit[0].length;
         if (
-          protectedSpans.some(
-            (span) =>
-              fixedTokens.includes(span[0]) &&
-              hit.index < span.index + span[0].length &&
-              hit.index + hit[0].length > span.index,
-          )
+          protectedSpans.some((span) => {
+            const spanStart = span.index;
+            const spanEnd = span.index + span[0].length;
+            if (hitStart >= spanEnd || hitEnd <= spanStart) return false;
+            return hitStart < spanStart || hitEnd > spanEnd;
+          })
         )
           fail("FIXED_ALIAS_CROSSING");
       }

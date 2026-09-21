@@ -123,6 +123,33 @@ test("regex cannot leak by crossing a learned fixed alias / 正则不能跨已�
   await assert.rejects(engine.redact("prefixAliasSuffix"));
 });
 
+test("a rule matching its own replacement does not block later turns / 规则匹配自身替换值不会拦截后续轮次", async (t) => {
+  // A shape-preserving replacement looks exactly like what the rule matches,
+  // so every later request re-matches it; that is expected, not a crossing.
+  // 同形替换值与规则所匹配的内容完全同形，后续请求会再次匹配到它，这属于预期而非跨越。
+  const { engine } = await fixture(t, [
+    { type: "regex", pattern: "(?<![0-9A-Za-z])\\d{17}[0-9Xx](?![0-9A-Za-z])" },
+  ]);
+  const first = (await engine.redact("id 450103199906212031")) as string;
+  const replacement = first.slice("id ".length);
+  assert.match(replacement, /^\d{18}$/);
+  assert.notEqual(replacement, "450103199906212031");
+  // Later turns carry the replacement in history and must still pass.
+  // 后续轮次的历史中带有该替换值，仍须通过。
+  assert.equal(await engine.redact(first), first);
+  const conversation = (await engine.redact({
+    messages: [first, "which digit is third?"],
+  })) as { messages: string[] };
+  assert.deepEqual(conversation.messages, [first, "which digit is third?"]);
+  const third = (await engine.redact({
+    history: ["id 450103199906212031", first],
+    ask: "third digit",
+  })) as { history: string[] };
+  assert.equal(third.history[0], first);
+  assert.equal(third.history[1], first);
+  assert.equal(engine.restoreText(replacement), "450103199906212031");
+});
+
 test("migration preserves fixed target and stops conflicting merge / 迁移保留固定目标并拒绝冲突合并", async (t) => {
   const { engine, dir } = await fixture(t, [
     { type: "literal", value: "secret", replacement: "Alias" },

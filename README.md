@@ -105,6 +105,8 @@ Letters and digits are replaced inside their own writing system: ASCII, Latin-1,
 
 **This is a deliberate trade-off.** An opaque token revealed only that a redaction happened; a shape-preserving value also reveals length, character classes and punctuation structure, and it looks like plausible real data to the model. Text in unsupported scripts is preserved as-is, so a rule matching such text may leave part of it visible.
 
+**The model reasons about the replacement, so answers derived from a protected value are wrong.** Asking for the third digit of a protected ID returns the third digit of the replacement, and only the value itself is restored in the reply, never the conclusion drawn from it. The answer therefore looks confident and consistent but does not match the restored value. An opaque token made this obvious, because the model could only report that it could not read the value. Do not ask the model about digits, checksums, ordering, arithmetic or comparisons involving protected values; compute those locally.
+
 Replacements are checked so restoration stays exact: a candidate is rejected if it equals the original, is already mapped, or already appears anywhere in the same request. When no unique candidate can be produced, typically for very short matches, the request is blocked with `SCAN_UNIQUE_FAILED`. Because a shaped value is indistinguishable from ordinary content, a model that independently emits the same short string will have it restored to the original, so prefer rules that match longer, distinctive values.
 
 ### Message language
@@ -304,6 +306,8 @@ pi -e ./src/index.ts
 字母和数字在各自文字体系内替换：ASCII、Latin-1、Latin Extended-A、Latin Extended Additional（含越南语）、希腊语、西里尔语、希伯来语、阿拉伯语、泰语、平假名、片假名、谚文及汉字。标点、空白、表情、符号以及上述范围之外的码位保持不变，这正是 URL、邮箱和内嵌 JSON 仍可解析的原因。
 
 **这是有意为之的权衡。** 不透明占位符仅暴露“发生了脱敏”；同形值还会暴露长度、字符类别和标点结构，并且在模型看来像真实数据。不支持的文字体系会原样保留，因此匹配这类文本的规则可能残留部分可见内容。
+
+**模型推理的是替换值，因此从受保护值推导出的答案是错的。** 询问受保护身份证号的第 3 位，得到的是替换值的第 3 位；回复中只有值本身会被还原，由它推导出的结论不会。因此答案看似笃定且自洽，却与还原后的值对不上。不透明占位符不会有这个问题，因为模型只能表示自己读不到该值。请勿让模型回答涉及受保护值的位数、校验位、排序、算术或比较，这类计算应在本地完成。
 
 为保证还原精确，候选值会被校验：与原文相同、已被占用、或已出现在同一请求中的候选值会被拒绝。无法生成唯一值时（通常是极短匹配），以 `SCAN_UNIQUE_FAILED` 拦截请求。由于同形值与普通内容难以区分，若模型自行输出了相同的短字符串，它会被还原为原文，因此应优先匹配更长、更有辨识度的值。
 

@@ -1,5 +1,19 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Fixed / 修复
+
+- Stop blocking a conversation once a regex rule has learned a value. Since 0.6.0 a replacement keeps the shape of what the rule matches, so the rule matches its own replacement in later turns; the alias-crossing guard treated that as a crossing and blocked every following request with `FIXED_ALIAS_CROSSING`. Only a match that straddles a replacement boundary is a crossing now; a match that is, or sits inside, a replacement is expected and skipped.
+  正则规则学习到值之后不再拦截整个会话。0.6.0 起替换值与规则所匹配的内容同形，因此后续轮次中规则会匹配到自身的替换值；别名跨越防护把这种情况当作跨越，使之后每个请求都以 `FIXED_ALIAS_CROSSING` 被拦。现在只有横跨替换值边界的匹配才算跨越，匹配到替换值本身或其内部属于预期并跳过。
+- Add a regression covering later turns that carry a learned replacement in history, while keeping the existing straddling-match rejection.
+  新增回归，覆盖历史中带有已学习替换值的后续轮次，同时保留对横跨匹配的拒绝。
+
+### Documentation / 文档
+
+- Document that the model reasons about the replacement, so answers derived from a protected value, such as a digit position or a checksum, are wrong even though the value itself is restored in the reply.
+  文档说明模型推理的是替换值，因此从受保护值推导出的答案（如第几位、校验位）是错的，尽管值本身在回复中会被还原。
+
 ## 0.6.2 — Numeric replacement retry and restoration / 数值替换重试与还原
 
 ### Fixed / 修复
