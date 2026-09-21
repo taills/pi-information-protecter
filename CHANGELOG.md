@@ -1,5 +1,18 @@
 # Changelog / 更新日志
 
+## 0.5.0 — Actionable block diagnostics / 可定位的拦截诊断
+
+- Replace the single generic block message with a stable code, failing stage, reason and suggested action across initialization, configuration, migration, request, scan, worker and audit paths.
+  将单一笼统拦截提示替换为稳定错误码、失败阶段、原因和处理建议，覆盖初始化、配置、迁移、请求、扫描、worker 和审计路径。
+- Report rule and node coordinates, exceeded limits and OS `errno` where known, including codes propagated from both bounded workers.
+  在已知时输出规则及节点定位、超限阈值和系统错误码，包括两个限时 worker 传递的错误码。
+- Reuse the initialization cause for later blocked requests and tool calls, and repeat the last recorded block through `/protecter status`.
+  后续被拦截的请求和工具调用复用初始化原因，并通过状态命令重新展示最近一次拦截。
+- Keep diagnostics free of request text, matched originals, replacement values, configuration content, file paths and raw OS messages; requests still fail closed.
+  诊断不包含请求文本、命中原文、替换值、配置内容、文件路径和原始系统消息；请求仍保持失败不放行。
+- Add diagnostics regressions for sanitization, hostile worker payloads, per-stage codes and rule coordinates.
+  新增诊断回归，覆盖净化、恶意 worker 数据、各阶段错误码和规则定位。
+
 ## 0.4.1 — Safe audit clearing / 安全审计清理
 
 - Add `/protecter logs clear`, restricted to local TUI with explicit confirmation and idle waiting; cancellation and non-TUI modes never clear records.

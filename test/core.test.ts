@@ -50,20 +50,31 @@ test("configuration is private, non-destructive, strict and has sanitized errors
   assert.equal(readFileSync(path, "utf8"), before);
   if (process.platform !== "win32")
     assert.equal(statSync(path).mode & 0o777, 0o600);
-  for (const sensitiveWords of [
-    [""],
-    [{ type: "regex", pattern: "(" }],
-    [{ type: "regex", pattern: "x", flags: "y" }],
-    [{ type: "literal", value: "x", typo: 1 }],
-  ]) {
+  // Errors name the failing rule and stage without echoing configuration text.
+  // 错误指出失败规则和阶段，不回显配置内容。
+  for (const [sensitiveWords, code] of [
+    [[""], "CONFIG_SCHEMA"],
+    [[{ type: "regex", pattern: "(" }], "CONFIG_REGEX"],
+    [[{ type: "regex", pattern: "x", flags: "y" }], "CONFIG_REGEX"],
+    [[{ type: "literal", value: "x", typo: 1 }], "CONFIG_SCHEMA"],
+  ] as const) {
     assert.throws(
       () => parseConfig(JSON.stringify({ version: 1, sensitiveWords })),
-      /配置/,
+      (error) => {
+        const message = (error as Error).message;
+        return (
+          message.includes(`code=${code}`) &&
+          message.includes("rule=1") &&
+          message.includes("stage=configuration")
+        );
+      },
     );
   }
   assert.throws(
     () => parseConfig('{"super-secret-invalid'),
-    (error) => !(error as Error).message.includes("super-secret"),
+    (error) =>
+      !(error as Error).message.includes("super-secret") &&
+      (error as Error).message.includes("code=CONFIG_JSON"),
   );
   assert.throws(() =>
     parseConfig('{"version":1,"sensitiveWords":[],"typo":true}'),

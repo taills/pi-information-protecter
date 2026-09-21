@@ -1,6 +1,6 @@
 {
   "name": "pi-information-protecter",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Sensitive Personal Information (SPI) Protecter — local reversible privacy redaction for Pi",
   "type": "module",
   "license": "MIT",

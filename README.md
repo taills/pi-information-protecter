@@ -14,7 +14,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 
 ```bash
 # Install the pinned npm release.
-pi install npm:pi-information-protecter@0.4.1
+pi install npm:pi-information-protecter@0.5.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -98,6 +98,26 @@ Use `/protecter logs clear` to empty only the current machine's audit log. Local
 
 **Logs contain real secrets and reversible mappings.** Unix permissions are 0600; symlinks, hard links and other-user files are rejected. Tool guards cover current/old hash log names and aliases but are not a sandbox. Logs are not encrypted, automatically rotated, migrated with configuration or used to rebuild mappings. Stop all Pi processes before locally archiving/deleting logs or inspecting a stale `.jsonl.lock`. Reading is bounded to the last 1 MiB, display to 100 records and 20,000 characters per preview. A log is capped at 32 MiB and a request batch at 8 MiB; full, unwritable, partial-tail or locked logs block matched requests rather than silently losing audits. Failed scans add no records; a hard crash can leave a partial batch that requires local repair.
 
+## Diagnosing a blocked request
+
+When a request is blocked, the notification names the failing stage, a stable code and a suggested action instead of one generic message:
+
+```text
+SPI Protecter blocked this request / 已阻止该请求
+code=CONFIG_EMPTY_MATCH stage=configuration rule=1
+Reason / 原因: Regex matches an empty string / 正则匹配空字符串
+Action / 处理: Require a non-empty match in the numbered rule / 修改指定规则，要求非空匹配
+Details / 详情: /protecter status
+```
+
+Stages are `initialization`, `configuration`, `migration`, `request`, `scan`, `worker`, `audit` and `internal`. Coordinates appear only when known: `rule` and `otherRule` are 1-based indexes into `sensitiveWords`, `node` counts scanned payload nodes, `bytes`/`limit`/`timeoutMs` report the exceeded limit, and `errno` is the OS error code.
+
+Common codes include `CONFIG_JSON`, `CONFIG_SCHEMA`, `CONFIG_REGEX`, `CONFIG_TARGET`, `CONFIG_CONFLICT`, `CONFIG_EMPTY_MATCH`, `CONFIG_SENSITIVE_TARGET`, `CONFIG_ALIAS_CONFLICT`, `CONFIG_UNSAFE`, `MIGRATION_LOCKED`, `MIGRATION_CHANGED`, `PAYLOAD_JSON`, `PAYLOAD_SIZE`, `SCAN_TIMEOUT`, `SCAN_MATCH_LIMIT`, `SCAN_COMPLEXITY`, `SCAN_ATTACHMENT`, `SCAN_JSON_REWRITE`, `FIXED_OVERLAP`, `FIXED_ALIAS_REUSED`, `AUDIT_FULL`, `AUDIT_PARTIAL`, `AUDIT_LOCKED`, `AUDIT_UNSAFE` and `WORKER_FAILED`.
+
+Notifications can scroll away, so `/protecter status` repeats the last recorded block for the session, and a tool blocked while protection is unavailable reports the same cause. Requests still fail closed: the outgoing payload is replaced with `{}`.
+
+**Diagnostics never include request text, matched originals, replacement values, configuration content, file paths or raw OS messages.** Only catalog codes, non-negative integer coordinates and an allow-listed `errno` are emitted, so they are safe to paste into an issue. Because matched content is excluded, locating an offending rule may still require local inspection using the reported rule index.
+
 ## How it works
 
 ```text
@@ -165,7 +185,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ```bash
 # 安装固定 npm 版本。
-pi install npm:pi-information-protecter@0.4.1
+pi install npm:pi-information-protecter@0.5.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -248,6 +268,26 @@ pi -e ./src/index.ts
 使用 `/protecter logs clear` 只清空当前机器的审计日志。必须在本地 TUI 确认；取消、RPC／打印模式或多余参数均不执行。确认后等待 Pi 空闲，与扫描排队并获取和追加日志相同的跨进程锁；安全验证后截断文件并同步，不删除文件，日志不存在则成功无操作。不改变配置、其他机器日志或内存映射；新请求可能立即新增记录。可清理已满或尾部残缺日志，但不绕过危险链接、占用锁或残留锁。这是不可撤销的逻辑删除，**不等于安全擦除**文件系统快照或备份。
 
 **日志包含真实秘密及可逆映射。** Unix 权限为 0600，拒绝符号链接、硬链接及他人文件。工具防护覆盖当前和旧机器哈希日志及别名，但不是沙箱。日志不加密、不自动轮转、不随配置迁移，也不用于恢复映射。请停止全部 Pi 进程后再本地归档、删除日志或检查残留 `.jsonl.lock`。读取限最后 1 MiB、最多 100 条，每条预览最多 20,000 字符；单日志上限 32 MiB、请求批次 8 MiB。日志满、不可写、尾部残缺或锁占用时，命中请求会被阻止，不静默漏记。扫描失败不新增记录，硬崩溃可能遗留部分批次，需本地修复。
+
+## 拦截原因定位
+
+请求被拦截时，提示不再是单一笼统信息，而是给出失败阶段、稳定错误码和处理建议：
+
+```text
+SPI Protecter blocked this request / 已阻止该请求
+code=CONFIG_EMPTY_MATCH stage=configuration rule=1
+Reason / 原因: Regex matches an empty string / 正则匹配空字符串
+Action / 处理: Require a non-empty match in the numbered rule / 修改指定规则，要求非空匹配
+Details / 详情: /protecter status
+```
+
+阶段包括初始化、配置、迁移、请求、扇描、worker、审计和内部错误。定位信息仅在已知时输出：`rule` 和 `otherRule` 是敏感词数组中从 1 开始的序号，`node` 为已扫描节点数，`bytes`、`limit`、`timeoutMs` 说明超限情况，`errno` 为系统错误码。
+
+常见错误码包括 `CONFIG_JSON`、`CONFIG_SCHEMA`、`CONFIG_REGEX`、`CONFIG_TARGET`、`CONFIG_CONFLICT`、`CONFIG_EMPTY_MATCH`、`CONFIG_SENSITIVE_TARGET`、`CONFIG_ALIAS_CONFLICT`、`CONFIG_UNSAFE`、`MIGRATION_LOCKED`、`MIGRATION_CHANGED`、`PAYLOAD_JSON`、`PAYLOAD_SIZE`、`SCAN_TIMEOUT`、`SCAN_MATCH_LIMIT`、`SCAN_COMPLEXITY`、`SCAN_ATTACHMENT`、`SCAN_JSON_REWRITE`、`FIXED_OVERLAP`、`FIXED_ALIAS_REUSED`、`AUDIT_FULL`、`AUDIT_PARTIAL`、`AUDIT_LOCKED`、`AUDIT_UNSAFE` 和 `WORKER_FAILED`。
+
+通知可能消失，因此 `/protecter status` 会重新展示本会话最近一次拦截；防护不可用时被拦截的工具也会报告同一原因。请求仍然失败不放行：出站请求体会被替换为 `{}`。
+
+**诊断信息不包含请求文本、命中原文、替换值、配置内容、文件路径或原始系统消息。** 仅输出目录内错误码、非负整数定位和白名单 `errno`，因此可安全粘贴到问题报告。也因为不包含命中内容，最终定位问题规则时，仍需根据规则序号在本地查看。
 
 ## 工作方式
 

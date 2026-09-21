@@ -25,6 +25,8 @@ Prevent configured personal information from accidentally entering Pi LLM reques
   日志使用 0600、安全打开检查、协作锁，并在返回脱敏请求前同步落盘；日志失败则拒绝请求。成功表示本地替换而非网关已接收。文件及预览大小受限，用户本地管理保留策略；硬崩溃可能残留锁或不完整记录，同用户权限攻击和终端录屏仍不在防护范围。
 - `/protecter` previews are TUI-only and require confirmation before showing original values; nothing is injected into model context or session entries. Trusted extensions may still observe UI hooks. Configuration caching remains memory-only during requests, but matched requests now perform audit-file writes.
   查看器仅限 TUI，展示原文前需确认，不注入模型上下文或会话条目；可信扩展仍可能观察 UI 钩子。出站规则依然使用内存缓存，但命中请求现在会写审计文件。
+- Block diagnostics carry a catalog code, stage, non-negative integer coordinates and an allow-listed OS `errno` only. Rule indexes and node counts are positions, not content. Raw exception messages, request text, matched originals, replacement values, configuration content and file paths are never surfaced, including across the worker boundary, so diagnostics are safe to share. Codes are intentionally coarse, so pinpointing a rule may still need local inspection.
+  拦截诊断仅包含目录错误码、阶段、非负整数定位和白名单系统错误码。规则序号和节点数只是位置，不是内容。不输出原始异常消息、请求文本、命中原文、替换值、配置内容和文件路径，worker 边界同样适用，因此诊断可安全分享；错误码有意保持粗粒度，精确定位规则仍可能需要本地查看。
 - Limit worker regex scans to 2 seconds, with resource and input limits. Errors exclude original configuration, rules and request text.
   worker 正则扫描限制为 2 秒，并限制资源和输入；错误不包含原始配置、规则或请求文本。
 - Pi 0.85.1 catches `before_provider_request` errors and continues with the current payload. Error paths therefore return `{}` and attempt cancellation. This does not guarantee zero HTTP requests; it prevents this handler from falling back to the original payload.

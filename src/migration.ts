@@ -4,7 +4,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import {
-  CONFIG_ERROR,
+  failure,
+  ProtectionError,
+  sanitizeError,
+  workerError,
+} from "./diagnostics.ts";
+import {
   DEFAULT_CONFIG,
   loadConfig,
   parseConfig,
@@ -47,16 +52,23 @@ export function validatePatterns(configs: Config[]): Promise<void> {
       },
     );
     let done = false;
-    const finish = (ok: boolean) => {
+    const finish = (ok: boolean, error = failure("WORKER_FAILED")) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       void worker.terminate();
       if (ok) resolvePromise();
-      else reject(new Error(CONFIG_ERROR));
+      else reject(error);
     };
-    const timer = setTimeout(() => finish(false), 2000);
-    worker.once("message", (value) => finish(value === true));
+    const timer = setTimeout(
+      () => finish(false, failure("CONFIG_TIMEOUT", { timeoutMs: 2000 })),
+      2000,
+    );
+    worker.once("message", (value) =>
+      value === true
+        ? finish(true)
+        : finish(false, workerError(value, "CONFIG_SCHEMA")),
+    );
     worker.once("error", () => finish(false));
     worker.once("exit", () => finish(false));
   });
@@ -84,25 +96,34 @@ export function mergeConfigs(configs: Config[]): Config {
       }
     }
   const raw = JSON.stringify({ version: 1, sensitiveWords: rules });
-  if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error(CONFIG_ERROR);
+  if (Buffer.byteLength(raw) > 1024 * 1024)
+    throw failure("CONFIG_SIZE", {
+      bytes: Buffer.byteLength(raw),
+      limit: 1024 * 1024,
+    });
   return parseConfig(raw);
 }
 
 function identity(path: string): string {
-  const s = fs.lstatSync(path, { bigint: true });
+  let s: fs.BigIntStats;
+  try {
+    s = fs.lstatSync(path, { bigint: true });
+  } catch (error) {
+    throw sanitizeError(error, "CONFIG_IO");
+  }
   if (
     !s.isFile() ||
     s.nlink !== 1n ||
     (process.getuid && s.uid !== BigInt(process.getuid()))
   )
-    throw new Error(CONFIG_ERROR);
+    throw failure("CONFIG_UNSAFE");
   return `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}`;
 }
 function source(dir: string, name: string): Source {
   const path = join(dir, name),
     before = identity(path);
   const loaded = loadConfig(path);
-  if (identity(path) !== before) throw new Error(CONFIG_ERROR);
+  if (identity(path) !== before) throw failure("MIGRATION_CHANGED");
   return {
     name,
     ...loaded,
@@ -113,7 +134,7 @@ function source(dir: string, name: string): Source {
 function unchanged(dir: string, previous: Source): void {
   const now = source(dir, previous.name);
   if (now.identity !== previous.identity || now.digest !== previous.digest)
-    throw new Error(CONFIG_ERROR);
+    throw failure("MIGRATION_CHANGED");
 }
 function names(dir: string): string[] {
   return fs
@@ -138,7 +159,7 @@ export async function migrateConfig(
   hash: string,
   options: MigrationOptions = {},
 ): Promise<Snapshot> {
-  if (!/^[a-f0-9]{32}$/.test(hash)) throw new Error(CONFIG_ERROR);
+  if (!/^[a-f0-9]{32}$/.test(hash)) throw failure("MACHINE_ID");
   const dir = resolve(directory),
     targetName = `protecter.${hash}.json`,
     path = join(dir, targetName);
@@ -150,20 +171,19 @@ export async function migrateConfig(
       fs.mkdirSync(lock, { mode: 0o700 });
       break;
     } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException).code !== "EEXIST" ||
-        Date.now() >= deadline
-      )
-        throw new Error(
-          "SPI Protecter: migration locked; check active processes / 迁移锁被占用，请检查活动进程。",
-        );
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST")
+        throw sanitizeError(error, "MIGRATION_IO");
+      if (Date.now() >= deadline)
+        throw failure("MIGRATION_LOCKED", {
+          timeoutMs: options.lockTimeoutMs ?? 5000,
+        });
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 50));
     }
   }
   let temp: string | undefined;
   try {
     const discovered = names(dir);
-    if (discovered.length > 64) throw new Error(CONFIG_ERROR);
+    if (discovered.length > 64) throw failure("MIGRATION_LIMIT", { limit: 64 });
     const ordered = [...discovered].sort((a, b) =>
       a === targetName ? -1 : b === targetName ? 1 : a.localeCompare(b),
     );
@@ -175,7 +195,7 @@ export async function migrateConfig(
     if (sources.length === 1 && sources[0].name === targetName) {
       unchanged(dir, sources[0]);
       if (JSON.stringify(names(dir)) !== JSON.stringify(discovered))
-        throw new Error(CONFIG_ERROR);
+        throw failure("MIGRATION_CHANGED");
       return {
         path,
         config: sources[0].config,
@@ -185,7 +205,11 @@ export async function migrateConfig(
       };
     }
     const raw = JSON.stringify(config, null, 2) + "\n";
-    if (Buffer.byteLength(raw) > 1024 * 1024) throw new Error(CONFIG_ERROR);
+    if (Buffer.byteLength(raw) > 1024 * 1024)
+      throw failure("CONFIG_SIZE", {
+        bytes: Buffer.byteLength(raw),
+        limit: 1024 * 1024,
+      });
     temp = join(dir, `.protecter-migration.${randomUUID()}.tmp`);
     const fd = fs.openSync(
       temp,
@@ -200,13 +224,13 @@ export async function migrateConfig(
     }
     options.checkpoint?.("beforeCommit", path);
     if (JSON.stringify(names(dir)) !== JSON.stringify(discovered))
-      throw new Error(CONFIG_ERROR);
+      throw failure("MIGRATION_CHANGED");
     for (const s of sources) unchanged(dir, s);
     fs.renameSync(temp, path);
     temp = undefined;
     syncDir(dir);
     const committed = source(dir, targetName);
-    if (committed.raw !== raw) throw new Error(CONFIG_ERROR);
+    if (committed.raw !== raw) throw failure("MIGRATION_CHANGED");
     options.checkpoint?.("afterCommit", path);
     for (const s of sources) {
       if (s.name === targetName) continue;
@@ -218,7 +242,7 @@ export async function migrateConfig(
     syncDir(dir);
     const expected = [targetName];
     if (JSON.stringify(names(dir)) !== JSON.stringify(expected))
-      throw new Error(CONFIG_ERROR);
+      throw failure("MIGRATION_CHANGED");
     unchanged(dir, committed);
     return {
       path,
@@ -227,8 +251,10 @@ export async function migrateConfig(
       sourceRaws: [...new Set([...sources.map((s) => s.raw), raw])],
       migrated: sources.filter((s) => s.name !== targetName).length,
     };
-  } catch {
-    throw new Error(CONFIG_ERROR);
+  } catch (error) {
+    throw error instanceof ProtectionError
+      ? error
+      : sanitizeError(error, "MIGRATION_IO");
   } finally {
     if (temp) {
       try {

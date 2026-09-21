@@ -1,8 +1,7 @@
 import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
+import { failure, sanitizeError } from "./diagnostics.ts";
 
-export const AUDIT_ERROR =
-  "SPI Protecter: audit unavailable; request blocked / 审计日志不可用，请求已阻止。";
 export interface AuditRecord {
   version: 1;
   time: string;
@@ -37,13 +36,27 @@ function openPrivate(path: string, write: boolean, create = write): number {
       stat.nlink !== 1 ||
       (process.getuid && stat.uid !== process.getuid())
     )
-      throw new Error();
+      throw failure("AUDIT_UNSAFE");
     if (process.platform !== "win32") fs.fchmodSync(fd, 0o600);
     return fd;
-  } catch {
+  } catch (error) {
     fs.closeSync(fd);
-    throw new Error(AUDIT_ERROR);
+    throw sanitizeError(error, "AUDIT_UNSAFE");
   }
+}
+
+/** Separate unsafe file types from ordinary IO failures. / 区分不安全文件类型与普通文件错误。 */
+function auditFailure(error: unknown) {
+  const errno =
+    error && typeof error === "object" && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return sanitizeError(
+    error,
+    errno === "ELOOP" || errno === "EISDIR" || errno === "ENOTDIR"
+      ? "AUDIT_UNSAFE"
+      : "AUDIT_IO",
+  );
 }
 
 async function acquireAuditLock(path: string): Promise<string> {
@@ -51,7 +64,10 @@ async function acquireAuditLock(path: string): Promise<string> {
   for (;;) {
     try { fs.mkdirSync(lock, { mode: 0o700 }); return lock; }
     catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || Date.now() >= deadline) throw new Error(AUDIT_ERROR);
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST")
+        throw sanitizeError(error, "AUDIT_IO");
+      if (Date.now() >= deadline)
+        throw failure("AUDIT_LOCKED", { timeoutMs: 2000 });
       await new Promise(resolve => setTimeout(resolve, 25));
     }
   }
@@ -71,7 +87,7 @@ export async function clearAudit(path: string): Promise<number> {
     fs.ftruncateSync(fd, 0);
     fs.fsyncSync(fd);
     return size;
-  } catch { throw new Error(AUDIT_ERROR); }
+  } catch (error) { throw auditFailure(error); }
   finally {
     try { if (fd !== undefined) fs.closeSync(fd); }
     finally { fs.rmdirSync(lock); }
@@ -102,17 +118,25 @@ export async function appendAudit(
       )
       .join("\n") + "\n",
   );
-  if (batch.length > MAX_BATCH) throw new Error(AUDIT_ERROR);
+  if (batch.length > MAX_BATCH)
+    throw failure("AUDIT_BATCH_LIMIT", {
+      bytes: batch.length,
+      limit: MAX_BATCH,
+    });
   const lock = await acquireAuditLock(path);
   let fd: number | undefined;
   try {
     fd = openPrivate(path, true);
     const size = fs.fstatSync(fd).size;
-    if (size + batch.length > MAX_LOG) throw new Error();
+    if (size + batch.length > MAX_LOG)
+      throw failure("AUDIT_FULL", {
+        bytes: size + batch.length,
+        limit: MAX_LOG,
+      });
     if (size) {
       const tail = Buffer.alloc(1);
       fs.readSync(fd, tail, 0, 1, size - 1);
-      if (tail[0] !== 10) throw new Error();
+      if (tail[0] !== 10) throw failure("AUDIT_PARTIAL");
     }
     try {
       let written = 0;
@@ -124,18 +148,18 @@ export async function appendAudit(
           batch.length - written,
           size + written,
         );
-        if (!n) throw new Error();
+        if (!n) throw failure("AUDIT_IO");
         written += n;
       }
       fs.fsyncSync(fd);
-    } catch {
+    } catch (error) {
       // Roll back partial writes while holding the cooperative lock. / 持有协作锁时回滚部分写入。
       fs.ftruncateSync(fd, size);
       fs.fsyncSync(fd);
-      throw new Error();
+      throw auditFailure(error);
     }
-  } catch {
-    throw new Error(AUDIT_ERROR);
+  } catch (error) {
+    throw auditFailure(error);
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
     fs.rmdirSync(lock);
@@ -148,7 +172,7 @@ export function readAudit(
   limit = 20,
 ): { records: AuditRecord[]; truncated: boolean } {
   if (!Number.isInteger(limit) || limit < 1 || limit > 100)
-    throw new Error(AUDIT_ERROR);
+    throw failure("INTERNAL", { limit: 100 });
   let fd: number | undefined;
   try {
     try {
@@ -193,8 +217,8 @@ export function readAudit(
       records,
       truncated: start > 0 || lines.length > limit || partial || invalid,
     };
-  } catch {
-    throw new Error(AUDIT_ERROR);
+  } catch (error) {
+    throw auditFailure(error);
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }

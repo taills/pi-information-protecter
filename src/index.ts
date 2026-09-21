@@ -3,8 +3,14 @@ import {
   VERSION,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { Protecter, REQUEST_ERROR } from "./engine.ts";
+import { Protecter } from "./engine.ts";
 import { blocksConfigAccess } from "./guard.ts";
+import {
+  failure,
+  formatDiagnostic,
+  sanitizeError,
+  type Diagnostic,
+} from "./diagnostics.ts";
 
 /**
  * Explicitly install this after other extensions that rewrite outgoing payloads.
@@ -15,10 +21,18 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   const compatible =
     /^0\.85\./.test(VERSION) && Number(VERSION.split(".")[2]) >= 1;
   let healthy = false;
+  // Remember the last block so the user can inspect it after the notification.
+  // 保留最近一次拦截原因，供通知消失后查看。
+  let lastBlock: { at: string; text: string } | undefined;
+  const record = (value: Diagnostic) => {
+    const text = formatDiagnostic(value);
+    lastBlock = { at: new Date().toISOString(), text };
+    return text;
+  };
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      if (!compatible) throw new Error();
+      if (!compatible) throw failure("UNSUPPORTED_PI");
       await engine.initialize();
       healthy = true;
       const count = engine.ruleCount;
@@ -28,23 +42,30 @@ export default function informationProtecter(pi: ExtensionAPI): void {
           "SPI Protecter: empty rules; edit local machine config and /reload / 规则为空，请编辑本地机器配置后重载。",
           "warning",
         );
-    } catch {
+    } catch (error) {
       healthy = false;
-      ctx.ui.notify(REQUEST_ERROR, "error");
+      ctx.ui.setStatus("protecter", "SPI Protecter · not ready / 未就绪");
+      ctx.ui.notify(
+        record(sanitizeError(error, "CONFIG_IO").diagnostic),
+        "error",
+      );
     }
   });
 
   pi.on("before_provider_request", async (event, ctx) => {
     try {
-      if (!compatible) throw new Error();
+      if (!compatible) throw failure("UNSUPPORTED_PI");
       const payload = await engine.redact(
         event.payload,
         ctx.model?.provider ?? "unknown",
       );
       healthy = true;
       return payload;
-    } catch {
+    } catch (error) {
       healthy = false;
+      // Diagnostics carry codes and numeric coordinates only, never payload text.
+      // 诊断仅包含错误码和数字定位，不包含请求文本。
+      const detail = record(sanitizeError(error, "INTERNAL").diagnostic);
       // Pi catches hook errors and continues with the ORIGINAL payload.
       // Pi 会捕获钩子异常并继续使用原始请求体。
       // Always return an empty replacement; abort/notifications are best-effort.
@@ -55,7 +76,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         /* Replacement below remains mandatory. / 仍须返回下方的替代请求体。 */
       }
       try {
-        ctx.ui.notify(REQUEST_ERROR, "error");
+        ctx.ui.notify(detail, "error");
       } catch {
         /* Never fail open. / 不因异常放行原文。 */
       }
@@ -94,7 +115,14 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   );
 
   pi.on("tool_call", (event, ctx) => {
-    if (!healthy) return { block: true, reason: "SPI Protecter 尚未就绪。" };
+    if (!healthy)
+      return {
+        block: true,
+        reason:
+          engine.lastDiagnosticText ??
+          lastBlock?.text ??
+          formatDiagnostic(failure("NOT_READY").diagnostic),
+      };
     const restored = engine.restore(event.input);
     for (const key of Object.keys(event.input))
       delete (event.input as Record<string, unknown>)[key];
@@ -109,7 +137,8 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     ) {
       return {
         block: true,
-        reason: "SPI Protecter：禁止工具访问保护配置，请由用户在本地编辑。",
+        reason:
+          "SPI Protecter blocked tool access to the protected configuration or audit log; edit it locally / 禁止工具访问受保护的配置或审计日志，请用户在本地编辑。",
       };
     }
   });
@@ -167,8 +196,11 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             const bytes = await engine.clearAuditRecords();
             healthy = engine.ready;
             ctx.ui.notify(`Audit cleared: ${bytes} bytes / 已清空日志：${bytes} 字节。`, "info");
-          } catch {
-            ctx.ui.notify("Unable to clear audit log; check permissions or lock / 无法清空日志，请检查权限或锁。", "error");
+          } catch (error) {
+            ctx.ui.notify(
+              record(sanitizeError(error, "AUDIT_IO").diagnostic),
+              "error",
+            );
           }
           return;
         }
@@ -209,9 +241,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               ? text.slice(0, 20000) + "\n[Preview truncated / 预览截断]"
               : text,
           );
-        } catch {
+        } catch (error) {
           ctx.ui.notify(
-            "Cannot read audit records / 无法读取审计记录。",
+            record(sanitizeError(error, "AUDIT_IO").diagnostic),
             "error",
           );
         }
@@ -222,8 +254,16 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         await ctx.reload();
         return;
       }
+      // Status repeats the last sanitized block so notifications are recoverable.
+      // 状态会重新展示最近一次安全诊断，避免通知消失后无法定位。
+      const last = engine.lastDiagnosticText ?? lastBlock?.text;
       ctx.ui.notify(
-        `SPI Protecter: ${engine.ready ? "ready / 就绪" : "not ready / 未就绪"}; ${engine.ruleCount} rules / 规则; ${engine.mappingCount} mappings / 映射. Memory snapshot; /reload to refresh / 内存快照，重载后更新。`,
+        [
+          `SPI Protecter: ${engine.ready ? "ready / 就绪" : "not ready / 未就绪"}; ${engine.ruleCount} rules / 规则; ${engine.mappingCount} mappings / 映射. Memory snapshot; /reload to refresh / 内存快照，重载后更新。`,
+          last
+            ? `\nLast block / 最近拦截${lastBlock ? ` @ ${lastBlock.at}` : ""}:\n${last}`
+            : "\nNo recorded block in this session / 本会话暂无拦截记录。",
+        ].join(""),
         engine.ready ? "info" : "error",
       );
     },

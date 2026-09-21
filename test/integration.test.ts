@@ -348,11 +348,22 @@ for (const mode of ["source", "packed"] as const) {
     rmSync(auditPath);
     mkdirSync(auditPath);
     await command.handler("logs clear", localCtx);
-    assert.ok(notices.some(message => message.startsWith("Unable to clear")));
-    assert.deepEqual(
-      await runner.emitBeforeProviderRequest({ text: "fake-private-password" }),
-      {},
+    // Failures name the audit stage instead of a generic message.
+    // 失败会指出审计阶段，而非笼统提示。
+    assert.ok(
+      notices.some(
+        (message) =>
+          message.includes("stage=audit") && message.includes("code=AUDIT_"),
+      ),
     );
+    const blockedByAudit = await runner.emitBeforeProviderRequest({
+      text: "fake-private-password",
+    });
+    assert.deepEqual(blockedByAudit, {});
+    const auditNotice = notices.at(-1)!;
+    assert.ok(auditNotice.includes("stage=audit"));
+    assert.ok(!auditNotice.includes("fake-private-password"));
+    assert.ok(!auditNotice.includes(auditPath));
     writeFileSync(path, "invalid-secret-config");
     await runner.emit({ type: "session_start", reason: "reload" });
     assert.deepEqual(
@@ -361,7 +372,18 @@ for (const mode of ["source", "packed"] as const) {
       }),
       {},
     );
+    // Configuration failures stay identifiable through status after reload.
+    // 配置失败在重载后仍可通过状态命令定位。
+    await command.handler("status", localCtx);
+    const statusNotice = notices.at(-1)!;
+    assert.ok(statusNotice.includes("Last block / 最近拦截"));
+    assert.ok(statusNotice.includes("code=CONFIG_JSON"));
+    assert.ok(statusNotice.includes("stage=configuration"));
+    assert.ok(!statusNotice.includes("must-never-leave"));
+    assert.ok(!statusNotice.includes("fake-private-password"));
     assert.equal(aborted, true);
-    assert.equal((await runner.emitToolCall(call))?.block, true);
+    const blockedTool = await runner.emitToolCall(call);
+    assert.equal(blockedTool?.block, true);
+    assert.ok(String(blockedTool?.reason).includes("code=CONFIG_JSON"));
   });
 }

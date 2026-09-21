@@ -3,6 +3,14 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { randomBytes } from "node:crypto";
 
+// Track the active rule/node so blocks can be located without exposing content.
+// 记录当前规则和节点，使拦截可定位而不暴露内容。
+let activeRule;
+let activeNode = 0;
+function fail(code, otherRule) {
+  throw { code, rule: activeRule, otherRule, node: activeNode };
+}
+
 try {
   const { payload, rules, entries, configRaws } = workerData;
   const originalToToken = new Map(
@@ -11,11 +19,13 @@ try {
   const tokenToOriginal = new Map(entries);
   const additions = [];
   const hitTokens = new Set();
-  const matchers = rules.map((rule) => {
-    if (typeof rule === "string") return { literal: rule };
+  const matchers = rules.map((rule, position) => {
+    const index = position + 1;
+    if (typeof rule === "string") return { literal: rule, rule: index };
     if (rule.type === "literal")
-      return { literal: rule.value, replacement: rule.replacement };
+      return { literal: rule.value, replacement: rule.replacement, rule: index };
     return {
+      rule: index,
       replacement: rule.replacement,
       regex: new RegExp(
         rule.pattern,
@@ -43,23 +53,24 @@ try {
   function tokenFor(original, replacement) {
     let token = originalToToken.get(original);
     if (token) {
-      if (replacement !== undefined && token !== replacement) throw new Error();
+      if (replacement !== undefined && token !== replacement)
+        fail("FIXED_MAPPING_CONFLICT");
       return token;
     }
     if (replacement !== undefined) {
-      if (tokenToOriginal.size >= 50000) throw new Error();
+      if (tokenToOriginal.size >= 50000) fail("SCAN_MAPPING_LIMIT");
       if (
         tokenToOriginal.has(replacement) &&
         tokenToOriginal.get(replacement) !== original
       )
-        throw new Error();
-      if (replacement.includes(original)) throw new Error();
+        fail("FIXED_ALIAS_REUSED");
+      if (replacement.includes(original)) fail("FIXED_SENSITIVE_TARGET");
       originalToToken.set(original, replacement);
       tokenToOriginal.set(replacement, original);
       additions.push([replacement, original]);
       return replacement;
     }
-    if (tokenToOriginal.size >= 50000) throw new Error();
+    if (tokenToOriginal.size >= 50000) fail("SCAN_MAPPING_LIMIT");
     do {
       token = `__PIP_${randomBytes(24).toString("hex")}__`;
     } while (tokenToOriginal.has(token) || payloadText.includes(token));
@@ -71,16 +82,18 @@ try {
   function redactPlain(text) {
     const spans = [];
     for (const matcher of matchers) {
+      activeRule = matcher.rule;
       if (matcher.literal === undefined) {
         matcher.regex.lastIndex = 0;
         for (const match of text.matchAll(matcher.regex)) {
-          if (!match[0].length) throw new Error();
+          if (!match[0].length) fail("SCAN_ZERO_WIDTH");
           spans.push([
             match.index,
             match.index + match[0].length,
             matcher.replacement,
+            matcher.rule,
           ]);
-          if (++matches > 100000) throw new Error();
+          if (++matches > 100000) fail("SCAN_MATCH_LIMIT");
         }
       } else {
         if (!matcher.literal) continue;
@@ -90,8 +103,9 @@ try {
             start,
             start + matcher.literal.length,
             matcher.replacement,
+            matcher.rule,
           ]);
-          if (++matches > 100000) throw new Error();
+          if (++matches > 100000) fail("SCAN_MATCH_LIMIT");
           start++; // Include overlapping occurrences. / 包含重叠匹配。
         }
       }
@@ -108,8 +122,11 @@ try {
             (prev[2] !== undefined &&
               span[2] !== undefined &&
               prev[2] !== span[2])
-          )
-            throw new Error();
+          ) {
+            activeRule = prev[3];
+            fail("FIXED_OVERLAP", span[3]);
+          }
+          if (prev[2] === undefined && span[2] !== undefined) prev[3] = span[3];
           prev[2] ??= span[2];
         }
         prev[1] = Math.max(prev[1], span[1]);
@@ -117,7 +134,8 @@ try {
     }
     let result = "",
       cursor = 0;
-    for (const [start, end, replacement] of merged) {
+    for (const [start, end, replacement, rule] of merged) {
+      activeRule = rule;
       const token = tokenFor(text.slice(start, end), replacement);
       hitTokens.add(token);
       result += text.slice(cursor, start) + token;
@@ -148,9 +166,11 @@ try {
     // 拒绝跨固定别名的正则匹配，避免文本切分隐藏敏感值。
     for (const matcher of matchers) {
       if (!matcher.regex || !fixedTokens.length) continue;
+      activeRule = matcher.rule;
       matcher.regex.lastIndex = 0;
       for (const hit of text.matchAll(matcher.regex)) {
-        if (++matches > 100000 || !hit[0].length) throw new Error();
+        if (++matches > 100000) fail("SCAN_MATCH_LIMIT");
+        if (!hit[0].length) fail("SCAN_ZERO_WIDTH");
         if (
           protectedSpans.some(
             (span) =>
@@ -159,7 +179,7 @@ try {
               hit.index + hit[0].length > span.index,
           )
         )
-          throw new Error();
+          fail("FIXED_ALIAS_CROSSING");
       }
     }
     for (const match of protectedSpans) {
@@ -170,7 +190,9 @@ try {
     return result + redactPlain(text.slice(cursor));
   }
   function walk(value, depth = 0) {
-    if (++nodes > 200000 || depth > 80) throw new Error();
+    activeNode = ++nodes;
+    activeRule = undefined;
+    if (nodes > 200000 || depth > 80) fail("SCAN_COMPLEXITY");
     if (typeof value === "string") {
       if (protectedTexts.some((text) => value.includes(text)))
         return redact(value);
@@ -191,7 +213,11 @@ try {
           // 规则可能跨越 JSON 语法，或匹配整个 JSON 形式的敏感值。
           // Return altered JSON only if it still parses; otherwise reject the request.
           // 仅返回仍可解析的修改后 JSON，否则拒绝请求。
-          JSON.parse(outer);
+          try {
+            JSON.parse(outer);
+          } catch {
+            fail("SCAN_JSON_REWRITE");
+          }
           return outer;
         }
       }
@@ -209,7 +235,7 @@ try {
         typeof value.type === "string" &&
         /image|audio|video|document|(^|_)file($|_)/i.test(value.type)
       )
-        throw new Error();
+        fail("SCAN_ATTACHMENT");
       if (
         Object.keys(value).some((key) =>
           /^(inlineData|inline_data|fileData|file_data|image_url|input_audio)$/.test(
@@ -217,21 +243,21 @@ try {
           ),
         )
       )
-        throw new Error();
+        fail("SCAN_ATTACHMENT");
       const result = Object.create(null);
       for (const [key, item] of Object.entries(value)) {
         const nextKey = redact(key);
-        if (Object.hasOwn(result, nextKey)) throw new Error();
+        if (Object.hasOwn(result, nextKey)) fail("SCAN_KEY_COLLISION");
         result[nextKey] = walk(item, depth + 1);
       }
       return result;
     }
     if (value === null || typeof value === "boolean") return value;
-    throw new Error();
+    fail("PAYLOAD_JSON");
   }
   const redacted = walk(payload);
   function containsToken(value, token, depth = 0) {
-    if (depth > 80) throw new Error();
+    if (depth > 80) fail("SCAN_COMPLEXITY");
     if (typeof value === "string") {
       if (value.includes(token)) return true;
       let parsed;
@@ -257,8 +283,16 @@ try {
     .filter((token) => containsToken(redacted, token))
     .map((token) => [token, tokenToOriginal.get(token)]);
   parentPort.postMessage({ payload: redacted, additions, hits });
-} catch {
-  // Never serialize an exception, original payload or configuration back into diagnostics.
-  // 不将异常、原始请求体或配置序列化到诊断信息中。
-  parentPort.postMessage({ failed: true });
+} catch (error) {
+  // Only internal codes and numeric coordinates cross the worker boundary.
+  // worker 边界仅传递内部错误码和数字定位，不传原文或原始异常。
+  parentPort.postMessage({
+    failed: true,
+    diagnostic: {
+      code: typeof error?.code === "string" ? error.code : "SCAN_INTERNAL",
+      rule: error?.rule ?? activeRule,
+      otherRule: error?.otherRule,
+      node: error?.node ?? activeNode,
+    },
+  });
 }
