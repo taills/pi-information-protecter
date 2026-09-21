@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
-import { appendAudit, readAudit, localTimestamp } from "../src/audit.ts";
+import { appendAudit, clearAudit, readAudit, localTimestamp } from "../src/audit.ts";
 import { Protecter } from "../src/engine.ts";
 import { blocksConfigAccess } from "../src/guard.ts";
 
@@ -129,6 +129,73 @@ test("engine logs unique successful hits per request and fails closed / 每请�
   fs.unlinkSync(engine.auditPath);
   fs.mkdirSync(engine.auditPath);
   await assert.rejects(engine.redact("secret", "demo"));
+});
+
+test("clear log safely and resume writing / 安全清空后继续写入", async t => {
+  const { dir, path } = fixture(t);
+  assert.equal(await clearAudit(path), 0);
+  assert.ok(!fs.existsSync(path));
+  const other = join(dir, `protecter.${"b".repeat(32)}.jsonl`);
+  fs.writeFileSync(other, "untouched");
+  fs.writeFileSync(path, "broken-tail");
+  const inode = fs.statSync(path).ino;
+  assert.equal(await clearAudit(path), 11);
+  assert.equal(fs.statSync(path).ino, inode);
+  assert.equal(fs.readFileSync(path, "utf8"), "");
+  assert.equal(fs.readFileSync(other, "utf8"), "untouched");
+  if (process.platform !== "win32") assert.equal(fs.statSync(path).mode & 0o777, 0o600);
+  fs.truncateSync(path, 32 * 1024 * 1024);
+  assert.equal(await clearAudit(path), 32 * 1024 * 1024);
+  await appendAudit(path, "demo", [["t", "value"]]);
+  assert.equal(readAudit(path).records.length, 1);
+});
+
+test("clear rejects unsafe files and held locks / 清理拒绝危险文件及占用锁", async t => {
+  const { dir, path } = fixture(t);
+  const other = join(dir, "other");
+  fs.writeFileSync(other, "untouched");
+  fs.symlinkSync(other, path);
+  await assert.rejects(clearAudit(path));
+  fs.unlinkSync(path); fs.linkSync(other, path);
+  await assert.rejects(clearAudit(path));
+  fs.unlinkSync(path); fs.mkdirSync(path);
+  await assert.rejects(clearAudit(path));
+  fs.rmdirSync(path);
+  fs.writeFileSync(path, "preserved");
+  fs.mkdirSync(`${path}.lock`);
+  await assert.rejects(clearAudit(path));
+  assert.equal(fs.readFileSync(path, "utf8"), "preserved");
+  assert.equal(fs.readFileSync(other, "utf8"), "untouched");
+  assert.ok(fs.existsSync(`${path}.lock`));
+});
+
+test("clearing queues with scans and preserves mappings / 清空与扫描排队且保留映射", async t => {
+  const { dir } = fixture(t);
+  fs.writeFileSync(join(dir, "protecter.json"), JSON.stringify({ version: 1, sensitiveWords: ["secret"] }));
+  const engine = new Protecter(dir, 2000, () => "a".repeat(32));
+  t.after(() => engine.close());
+  await engine.initialize();
+  const config = fs.readFileSync(engine.configPath, "utf8");
+  const first = engine.redact("secret");
+  const clear = engine.clearAuditRecords();
+  const second = engine.redact("secret");
+  const [token, bytes, repeated] = await Promise.all([first, clear, second]);
+  assert.ok(bytes > 0);
+  assert.equal(token, repeated);
+  assert.equal(engine.restoreText(token as string), "secret");
+  assert.equal(engine.auditRecords().records.length, 1);
+  assert.equal(fs.readFileSync(engine.configPath, "utf8"), config);
+});
+
+test("separate process clear waits for shared lock / 独立进程清理等待共享锁", async t => {
+  const { path } = fixture(t);
+  await appendAudit(path, "demo", [["t", "secret"]]);
+  fs.mkdirSync(`${path}.lock`);
+  const code = `import { clearAudit } from ${JSON.stringify(pathToFileURL(resolve("src/audit.ts")).href)}; await clearAudit(${JSON.stringify(path)});`;
+  const child = promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", code]);
+  const release = new Promise<void>(resolveTimer => setTimeout(() => { fs.rmdirSync(`${path}.lock`); resolveTimer(); }, 250));
+  await Promise.all([child, release]);
+  assert.equal(fs.statSync(path).size, 0);
 });
 
 test("protect log paths and aliases without blocking documentation / 保护日志及别名但不拦截文档", async (t) => {

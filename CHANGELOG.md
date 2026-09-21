@@ -1,5 +1,14 @@
 # Changelog / 更新日志
 
+## 0.4.1 — Safe audit clearing / 安全审计清理
+
+- Add `/protecter logs clear`, restricted to local TUI with explicit confirmation and idle waiting; cancellation and non-TUI modes never clear records.
+  新增本地 TUI 确认及空闲等待的日志清理命令，取消或非 TUI 模式不清理。
+- Serialize clearing with scans and the existing cross-process append lock; truncate and fsync the validated current log without deleting configuration, other logs or in-memory mappings.
+  清理与扫描及现有跨进程写锁协调，对验证后的当前日志截断并同步，不删除配置、其他日志或内存映射。
+- Cover missing/full/partial logs, unsafe links, occupied locks, resumed writes and source/packed command execution in regression tests.
+  回归覆盖缺失、满容量、残缺日志、不安全链接、占用锁、恢复写入及源码和实际发布包命令执行。
+
 ## 0.4.0 — Fixed replacement aliases / 固定替换别名
 
 - Add optional literal `replacement` strings to literal and regex rules; omitted targets retain stable per-instance random placeholders.

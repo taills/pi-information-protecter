@@ -14,7 +14,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.85.1–0.85.x**, 
 
 ```bash
 # Install the pinned npm release.
-pi install npm:pi-information-protecter@0.4.0
+pi install npm:pi-information-protecter@0.4.1
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -94,6 +94,8 @@ One record is written per distinct original/token pair per successful scan; repe
 
 `/protecter` or `/protecter logs [1-100]` reads the most recent records (20 by default). Local TUI only: choose a time/provider entry, then confirm before revealing plaintext. The editor is a preview and discards edits. Controls are escaped; long previews are truncated. RPC/print modes do not display secrets, and the command never calls `sendMessage` or writes session entries.
 
+Use `/protecter logs clear` to empty only the current machine's audit log. Local TUI confirmation is mandatory; cancelling, RPC/print mode or extra arguments do nothing. After confirmation, Pi waits for idle, queues the clear with scans and acquires the same cross-process log lock as appends. The validated file is truncated and synced, not unlinked; missing logs are a successful no-op. Configuration, other machine logs and in-memory mappings remain unchanged. New requests may immediately append new records. Full or partial-tail logs can be cleared, but unsafe links and occupied/stale locks are never bypassed. This is irreversible logical deletion, **not secure erasure** of filesystem snapshots/backups.
+
 **Logs contain real secrets and reversible mappings.** Unix permissions are 0600; symlinks, hard links and other-user files are rejected. Tool guards cover current/old hash log names and aliases but are not a sandbox. Logs are not encrypted, automatically rotated, migrated with configuration or used to rebuild mappings. Stop all Pi processes before locally archiving/deleting logs or inspecting a stale `.jsonl.lock`. Reading is bounded to the last 1 MiB, display to 100 records and 20,000 characters per preview. A log is capped at 32 MiB and a request batch at 8 MiB; full, unwritable, partial-tail or locked logs block matched requests rather than silently losing audits. Failed scans add no records; a hard crash can leave a partial batch that requires local repair.
 
 ## How it works
@@ -163,7 +165,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ```bash
 # 安装固定 npm 版本。
-pi install npm:pi-information-protecter@0.4.0
+pi install npm:pi-information-protecter@0.4.1
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -242,6 +244,8 @@ pi -e ./src/index.ts
 每次成功扫描，对不同的原文与占位符组合分别记录一行，同一请求内重复出现会去重。后续请求再次替换同一原文时仍新增记录，即使复用占位符。已有占位符和无命中请求不新增记录。日志表示**本地脱敏事件，而非网络已成功发送**，之后仍可能取消、被其他钩子修改或发生提供商错误。
 
 `/protecter` 或 `/protecter logs [1-100]` 查看最近记录，默认 20 条。仅在本地 TUI 可用：先选择时间及供应商条目，确认后才显示明文。编辑器只作预览，修改不保存；控制字符转义，过长预览截断。RPC、打印模式不展示秘密，命令不调用消息发送接口，也不写入会话条目。
+
+使用 `/protecter logs clear` 只清空当前机器的审计日志。必须在本地 TUI 确认；取消、RPC／打印模式或多余参数均不执行。确认后等待 Pi 空闲，与扫描排队并获取和追加日志相同的跨进程锁；安全验证后截断文件并同步，不删除文件，日志不存在则成功无操作。不改变配置、其他机器日志或内存映射；新请求可能立即新增记录。可清理已满或尾部残缺日志，但不绕过危险链接、占用锁或残留锁。这是不可撤销的逻辑删除，**不等于安全擦除**文件系统快照或备份。
 
 **日志包含真实秘密及可逆映射。** Unix 权限为 0600，拒绝符号链接、硬链接及他人文件。工具防护覆盖当前和旧机器哈希日志及别名，但不是沙箱。日志不加密、不自动轮转、不随配置迁移，也不用于恢复映射。请停止全部 Pi 进程后再本地归档、删除日志或检查残留 `.jsonl.lock`。读取限最后 1 MiB、最多 100 条，每条预览最多 20,000 字符；单日志上限 32 MiB、请求批次 8 MiB。日志满、不可写、尾部残缺或锁占用时，命中请求会被阻止，不静默漏记。扫描失败不新增记录，硬崩溃可能遗留部分批次，需本地修复。
 

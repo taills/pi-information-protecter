@@ -37,11 +37,18 @@ test("fixed literals plus random fallback and audit / 固定字面替换、随�
 });
 
 test("multi-turn history keeps exact redacted prefixes / 多轮历史保持精确脱敏前缀", async (t) => {
-  const { engine } = await fixture(t, ["random-secret", { type: "literal", value: "Apple Inc.", replacement: "Alphabet Inc." }]);
+  const { engine } = await fixture(t, [
+    "random-secret",
+    { type: "literal", value: "Apple Inc.", replacement: "Alphabet Inc." },
+  ]);
   const first = [{ role: "user", content: "random-secret Apple Inc." }];
-  const masked = await engine.redact(first) as typeof first;
+  const masked = (await engine.redact(first)) as typeof first;
   const restored = engine.restoreText(masked[0].content);
-  const next = await engine.redact([...first, { role: "assistant", content: restored }, { role: "user", content: "continue" }]) as typeof first;
+  const next = (await engine.redact([
+    ...first,
+    { role: "assistant", content: restored },
+    { role: "user", content: "continue" },
+  ])) as typeof first;
   assert.equal(JSON.stringify(next[0]), JSON.stringify(masked[0]));
   assert.equal(next[1].content, masked[0].content);
 });

@@ -172,11 +172,15 @@ for (const mode of ["source", "packed"] as const) {
     const command = runner.getCommand("protecter")!;
     const commandCtx = runner.createCommandContext();
     const previews: string[] = [];
+    const notices: string[] = [];
+    let waited = 0;
     const localCtx = {
       ...commandCtx,
       mode: "tui" as const,
+      waitForIdle: async () => { waited++; },
       ui: {
         ...commandCtx.ui,
+        notify: (message: string) => { notices.push(message); },
         select: async (_title: string, options: string[]) => options[0],
         confirm: async () => true,
         editor: async (_title: string, text?: string) => {
@@ -315,6 +319,24 @@ for (const mode of ["source", "packed"] as const) {
     });
     assert.ok(!JSON.stringify(followup).includes("fake-private-password"));
 
+    const savedAudit = readFileSync(auditPath, "utf8");
+    const savedConfig = readFileSync(path, "utf8");
+    await command.handler("logs clear", { ...localCtx, mode: "rpc" });
+    await command.handler("logs clear", { ...localCtx, mode: "print" });
+    await command.handler("logs clear", { ...localCtx, ui: { ...localCtx.ui, confirm: async () => false } });
+    await command.handler("logs clear extra", localCtx);
+    assert.equal(readFileSync(auditPath, "utf8"), savedAudit);
+    assert.equal(waited, 0);
+    await command.handler("logs clear", localCtx);
+    assert.equal(waited, 1);
+    assert.equal(readFileSync(auditPath, "utf8"), "");
+    assert.equal(readFileSync(path, "utf8"), savedConfig);
+    assert.ok(notices.some(message => message.startsWith("Audit cleared:")));
+    assert.equal(injected, 0);
+    const afterClear = await runner.emitBeforeProviderRequest({ text: "fake-private-password" }) as { text: string };
+    assert.equal(afterClear.text, token);
+    assert.equal(JSON.parse(readFileSync(auditPath, "utf8").trim()).replacement, token);
+
     rmSync(path);
     assert.ok(
       !JSON.stringify(
@@ -325,6 +347,8 @@ for (const mode of ["source", "packed"] as const) {
     );
     rmSync(auditPath);
     mkdirSync(auditPath);
+    await command.handler("logs clear", localCtx);
+    assert.ok(notices.some(message => message.startsWith("Unable to clear")));
     assert.deepEqual(
       await runner.emitBeforeProviderRequest({ text: "fake-private-password" }),
       {},

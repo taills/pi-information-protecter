@@ -138,10 +138,10 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         !["status", "reload", "logs"].includes(action) ||
         (action !== "logs" && parts.length > 1) ||
         parts.length > 2 ||
-        (parts[1] !== undefined && !/^(?:[1-9]\d?|100)$/.test(parts[1]))
+        (parts[1] !== undefined && parts[1] !== "clear" && !/^(?:[1-9]\d?|100)$/.test(parts[1]))
       ) {
         ctx.ui.notify(
-          "Usage / 用法: /protecter [logs [1-100]|status|reload]. No secrets in arguments / 不要在参数中输入秘密。",
+          "Usage / 用法: /protecter [logs [1-100|clear]|status|reload]. No secrets in arguments / 不要在参数中输入秘密。",
           "info",
         );
         return;
@@ -154,6 +154,22 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             "Local TUI required / 请在本地 TUI 查看记录。",
             "warning",
           );
+          return;
+        }
+        if (parts[1] === "clear") {
+          try {
+            if (!engine.ready) throw new Error();
+            if (!await ctx.ui.confirm(
+              "Clear current audit log? / 清空当前审计日志？",
+              "Irreversible. Only this machine's log; config and mappings stay. Later requests may add records. / 不可撤销，仅清空本机日志，保留配置和映射，后续请求可能新增记录。",
+            )) return;
+            await ctx.waitForIdle();
+            const bytes = await engine.clearAuditRecords();
+            healthy = engine.ready;
+            ctx.ui.notify(`Audit cleared: ${bytes} bytes / 已清空日志：${bytes} 字节。`, "info");
+          } catch {
+            ctx.ui.notify("Unable to clear audit log; check permissions or lock / 无法清空日志，请检查权限或锁。", "error");
+          }
           return;
         }
         try {

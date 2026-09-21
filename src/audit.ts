@@ -20,11 +20,11 @@ export function localTimestamp(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
-function openPrivate(path: string, write: boolean): number {
+function openPrivate(path: string, write: boolean, create = write): number {
   const fd = fs.openSync(
     path,
     (write
-      ? fs.constants.O_RDWR | fs.constants.O_CREAT
+      ? fs.constants.O_RDWR | (create ? fs.constants.O_CREAT : 0)
       : fs.constants.O_RDONLY) |
       fs.constants.O_NOFOLLOW |
       fs.constants.O_NONBLOCK,
@@ -43,6 +43,38 @@ function openPrivate(path: string, write: boolean): number {
   } catch {
     fs.closeSync(fd);
     throw new Error(AUDIT_ERROR);
+  }
+}
+
+async function acquireAuditLock(path: string): Promise<string> {
+  const lock = `${path}.lock`, deadline = Date.now() + 2000;
+  for (;;) {
+    try { fs.mkdirSync(lock, { mode: 0o700 }); return lock; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST" || Date.now() >= deadline) throw new Error(AUDIT_ERROR);
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }
+}
+
+/** Truncate only the validated current log; never unlink or clear mappings. / 仅截断验证后的当前日志，不删除文件或映射。 */
+export async function clearAudit(path: string): Promise<number> {
+  const lock = await acquireAuditLock(path);
+  let fd: number | undefined;
+  try {
+    try { fd = openPrivate(path, true, false); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
+      throw error;
+    }
+    const size = fs.fstatSync(fd).size;
+    fs.ftruncateSync(fd, 0);
+    fs.fsyncSync(fd);
+    return size;
+  } catch { throw new Error(AUDIT_ERROR); }
+  finally {
+    try { if (fd !== undefined) fs.closeSync(fd); }
+    finally { fs.rmdirSync(lock); }
   }
 }
 
@@ -71,21 +103,7 @@ export async function appendAudit(
       .join("\n") + "\n",
   );
   if (batch.length > MAX_BATCH) throw new Error(AUDIT_ERROR);
-  const lock = `${path}.lock`,
-    deadline = Date.now() + 2000;
-  for (;;) {
-    try {
-      fs.mkdirSync(lock, { mode: 0o700 });
-      break;
-    } catch (error) {
-      if (
-        (error as NodeJS.ErrnoException).code !== "EEXIST" ||
-        Date.now() >= deadline
-      )
-        throw new Error(AUDIT_ERROR);
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-  }
+  const lock = await acquireAuditLock(path);
   let fd: number | undefined;
   try {
     fd = openPrivate(path, true);

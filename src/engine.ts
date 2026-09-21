@@ -2,7 +2,7 @@ import { Worker } from "node:worker_threads";
 import { fileURLToPath } from "node:url";
 import { migrateConfig, type Snapshot } from "./migration.ts";
 import { getMachineHash } from "./machine.ts";
-import { appendAudit, readAudit } from "./audit.ts";
+import { appendAudit, clearAudit, readAudit } from "./audit.ts";
 
 export const REQUEST_ERROR =
   "SPI Protecter: request cleared; check config, audit log, scan limits or attachments / 请求已清空，请检查配置、审计日志、扫描限制或附件。";
@@ -34,6 +34,14 @@ export class Protecter {
   auditRecords(limit = 20) {
     if (!this.ready) throw new Error(REQUEST_ERROR);
     return readAudit(this.auditPath, limit);
+  }
+  clearAuditRecords(): Promise<number> {
+    const run = this.queue.then(() => {
+      if (!this.ready) throw new Error(REQUEST_ERROR);
+      return clearAudit(this.auditPath);
+    });
+    this.queue = run.catch(() => undefined);
+    return run;
   }
   get ruleCount(): number {
     return this.snapshot?.config.sensitiveWords.length ?? 0;
