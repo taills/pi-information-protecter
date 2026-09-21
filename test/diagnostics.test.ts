@@ -4,13 +4,27 @@ import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Protecter } from "../src/engine.ts";
-import { diagnostic, failure, formatDiagnostic, sanitizeError, workerError } from "../src/diagnostics.ts";
+import {
+  diagnostic,
+  failure,
+  formatDiagnostic,
+  sanitizeError,
+  workerError,
+} from "../src/diagnostics.ts";
 import { type Rule } from "../src/config.ts";
+import { detectLocale, setLocale } from "../src/locale.ts";
 
-async function fixture(t: { after(fn: () => void): void }, rules: Rule[], timeout = 2000) {
+async function fixture(
+  t: { after(fn: () => void): void },
+  rules: Rule[],
+  timeout = 2000,
+) {
   const dir = fs.mkdtempSync(join(tmpdir(), "spi-diag-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-  fs.writeFileSync(join(dir, "protecter.json"), JSON.stringify({ version: 1, sensitiveWords: rules }));
+  fs.writeFileSync(
+    join(dir, "protecter.json"),
+    JSON.stringify({ version: 1, sensitiveWords: rules }),
+  );
   const engine = new Protecter(dir, timeout, () => "a".repeat(32));
   t.after(() => engine.close());
   await engine.initialize();
@@ -27,17 +41,46 @@ function errorOf(action: Promise<unknown>): Promise<Error> {
 
 async function codeOf(action: Promise<unknown>) {
   const error = await errorOf(action);
-  if (error.message.includes("expected failure but succeeded")) return "NO_ERROR";
+  if (error.message.includes("expected failure but succeeded"))
+    return "NO_ERROR";
   return error.message.match(/code=([A-Z_]+)/)?.[1] ?? "UNPARSED";
 }
 
-test("diagnostics expose code, stage and action without free text / 诊断输出错误码、阶段和建议且不含自由文本", () => {
-  const text = formatDiagnostic(diagnostic("SCAN_TIMEOUT", { timeoutMs: 2000 }));
-  assert.ok(text.includes("code=SCAN_TIMEOUT"));
-  assert.ok(text.includes("stage=scan"));
-  assert.ok(text.includes("timeoutMs=2000"));
-  assert.ok(text.includes("Action / 处理:"));
-  assert.ok(text.includes("/protecter status"));
+test("diagnostics expose code, stage and action in one language / 诊断以单一语言输出错误码、阶段和建议", (t) => {
+  t.after(() => setLocale(detectLocale()));
+  setLocale("en");
+  const english = formatDiagnostic(
+    diagnostic("SCAN_TIMEOUT", { timeoutMs: 2000 }),
+  );
+  assert.ok(english.includes("code=SCAN_TIMEOUT"));
+  assert.ok(english.includes("stage=scan"));
+  assert.ok(english.includes("timeoutMs=2000"));
+  assert.ok(english.includes("Action: "));
+  assert.ok(english.includes("/protecter status"));
+  // English output must not carry Chinese text, and vice versa. / 英文输出不得夹带中文，反之亦同。
+  assert.ok(!/[\u4e00-\u9fa5]/.test(english));
+
+  setLocale("zh");
+  const chinese = formatDiagnostic(
+    diagnostic("SCAN_TIMEOUT", { timeoutMs: 2000 }),
+  );
+  assert.ok(chinese.includes("code=SCAN_TIMEOUT"));
+  assert.ok(chinese.includes("处理："));
+  assert.ok(!chinese.includes("Action"));
+  assert.ok(!chinese.includes("Reason"));
+});
+
+test("locale detection prefers explicit environment values / 语言检测优先使用显式环境变量", () => {
+  assert.equal(detectLocale({ PI_PROTECTER_LANG: "zh" }), "zh");
+  assert.equal(
+    detectLocale({ PI_PROTECTER_LANG: "en", LANG: "zh_CN.UTF-8" }),
+    "en",
+  );
+  assert.equal(detectLocale({ LC_ALL: "zh_CN.UTF-8" }), "zh");
+  assert.equal(detectLocale({ LANG: "zh-Hans" }), "zh");
+  assert.equal(detectLocale({ LANG: "de_DE.UTF-8" }), "en");
+  // Unsupported languages fall back to English rather than mixing. / 不支持的语言回退英文，而非混排。
+  assert.equal(detectLocale({ LANG: "ja_JP.UTF-8" }), "en");
 });
 
 test("only safe coordinates and known errno survive / 仅保留安全定位与已知错误码", () => {
@@ -64,12 +107,18 @@ test("only safe coordinates and known errno survive / 仅保留安全定位与�
 });
 
 test("raw errors and worker payloads are sanitized / 原始错误与 worker 数据被净化", () => {
-  const raw = Object.assign(new Error("secret value at /home/user/protecter.json"), { code: "EACCES" });
+  const raw = Object.assign(
+    new Error("secret value at /home/user/protecter.json"),
+    { code: "EACCES" },
+  );
   const safe = sanitizeError(raw, "AUDIT_IO");
   assert.ok(!safe.message.includes("secret value"));
   assert.ok(!safe.message.includes("/home/user"));
   assert.ok(safe.message.includes("errno=EACCES"));
-  const hostile = workerError({ code: "__proto__", rule: "3", note: "leak /tmp/secret" }, "SCAN_INTERNAL");
+  const hostile = workerError(
+    { code: "__proto__", rule: "3", note: "leak /tmp/secret" },
+    "SCAN_INTERNAL",
+  );
   assert.ok(hostile.message.includes("code=SCAN_INTERNAL"));
   assert.ok(!hostile.message.includes("leak"));
   assert.equal(hostile.diagnostic.rule, undefined);
@@ -78,13 +127,27 @@ test("raw errors and worker payloads are sanitized / 原始错误与 worker 数�
 
 test("request stages report distinct codes / 请求各阶段报告不同错误码", async (t) => {
   const { engine } = await fixture(t, ["secret"]);
-  assert.equal(await codeOf(engine.redact({ self: {} as never, ...{} })), "NO_ERROR");
+  assert.equal(
+    await codeOf(engine.redact({ self: {} as never, ...{} })),
+    "NO_ERROR",
+  );
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
   assert.equal(await codeOf(engine.redact(cyclic)), "PAYLOAD_JSON");
-  assert.equal(await codeOf(engine.redact("x".repeat(8 * 1024 * 1024 + 1))), "PAYLOAD_SIZE");
-  assert.equal(await codeOf(engine.redact({ type: "image", data: "secret" })), "SCAN_ATTACHMENT");
-  assert.equal(await codeOf(engine.redact({ parts: [{ inlineData: { data: "secret" } }] })), "SCAN_ATTACHMENT");
+  assert.equal(
+    await codeOf(engine.redact("x".repeat(8 * 1024 * 1024 + 1))),
+    "PAYLOAD_SIZE",
+  );
+  assert.equal(
+    await codeOf(engine.redact({ type: "image", data: "secret" })),
+    "SCAN_ATTACHMENT",
+  );
+  assert.equal(
+    await codeOf(
+      engine.redact({ parts: [{ inlineData: { data: "secret" } }] }),
+    ),
+    "SCAN_ATTACHMENT",
+  );
   let deep: unknown = "secret";
   for (let i = 0; i < 90; i++) deep = [deep];
   assert.equal(await codeOf(engine.redact(deep)), "SCAN_COMPLEXITY");
@@ -92,20 +155,28 @@ test("request stages report distinct codes / 请求各阶段报告不同错误�
 
 test("scan timeout and mapping conflicts are identified with rule numbers / 超时与映射冲突给出规则编号", async (t) => {
   const slow = await fixture(t, [{ type: "regex", pattern: "(a+)+$" }], 150);
-  assert.equal(await codeOf(slow.engine.redact("a".repeat(10000) + "!")), "SCAN_TIMEOUT");
+  assert.equal(
+    await codeOf(slow.engine.redact("a".repeat(10000) + "!")),
+    "SCAN_TIMEOUT",
+  );
 
   const zero = await fixture(t, ["safe", { type: "regex", pattern: "(?=x)" }]);
   const zeroError = await errorOf(zero.engine.redact("x"));
   assert.ok(zeroError.message.includes("code=SCAN_ZERO_WIDTH"));
   assert.ok(zeroError.message.includes("rule=2"));
 
-  const overlap = await fixture(t, [{ type: "literal", value: "abc", replacement: "Alias" }, "bcde"]);
+  const overlap = await fixture(t, [
+    { type: "literal", value: "abc", replacement: "Alias" },
+    "bcde",
+  ]);
   const overlapError = await errorOf(overlap.engine.redact("abcde"));
   assert.ok(overlapError.message.includes("code=FIXED_OVERLAP"));
   assert.ok(overlapError.message.includes("rule=1"));
   assert.ok(overlapError.message.includes("otherRule=2"));
 
-  const reused = await fixture(t, [{ type: "regex", pattern: "key-[0-9]+", replacement: "MyPrivateKey" }]);
+  const reused = await fixture(t, [
+    { type: "regex", pattern: "key-[0-9]+", replacement: "MyPrivateKey" },
+  ]);
   await reused.engine.redact("key-1");
   const reusedError = await errorOf(reused.engine.redact("key-2"));
   assert.ok(reusedError.message.includes("code=FIXED_ALIAS_REUSED"));
@@ -128,17 +199,43 @@ test("configuration failures name the stage and rule / 配置失败指出阶段�
   fs.writeFileSync(path, JSON.stringify({ version: 2, sensitiveWords: [] }));
   assert.equal(await codeOf(engine.initialize()), "CONFIG_SCHEMA");
 
-  fs.writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: [{ type: "regex", pattern: ".*" }] }));
+  fs.writeFileSync(
+    path,
+    JSON.stringify({
+      version: 1,
+      sensitiveWords: [{ type: "regex", pattern: ".*" }],
+    }),
+  );
   assert.equal(await codeOf(engine.initialize()), "CONFIG_EMPTY_MATCH");
 
-  fs.writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: [{ type: "literal", value: "secret", replacement: "secret-copy" }] }));
+  fs.writeFileSync(
+    path,
+    JSON.stringify({
+      version: 1,
+      sensitiveWords: [
+        { type: "literal", value: "secret", replacement: "secret-copy" },
+      ],
+    }),
+  );
   assert.equal(await codeOf(engine.initialize()), "CONFIG_SENSITIVE_TARGET");
 
-  fs.writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: [{ type: "literal", value: "one", replacement: "Alias" }, { type: "literal", value: "two", replacement: "AliasLong" }] }));
+  fs.writeFileSync(
+    path,
+    JSON.stringify({
+      version: 1,
+      sensitiveWords: [
+        { type: "literal", value: "one", replacement: "Alias" },
+        { type: "literal", value: "two", replacement: "AliasLong" },
+      ],
+    }),
+  );
   const aliasCode = await codeOf(engine.initialize());
   assert.equal(aliasCode, "CONFIG_ALIAS_CONFLICT");
 
-  fs.writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: ["ok"] }));
+  fs.writeFileSync(
+    path,
+    JSON.stringify({ version: 1, sensitiveWords: ["ok"] }),
+  );
   await engine.initialize();
   assert.equal(engine.lastDiagnostic, undefined);
 });

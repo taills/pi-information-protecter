@@ -122,7 +122,16 @@ test("redact all payload text and restore without mutating local source", async 
     original,
   );
   assert.deepEqual(payload, original);
-  assert.match(JSON.stringify(masked), /__PIP_[a-f0-9]{48}__/);
+  // Replacements keep length, character classes and punctuation structure.
+  // 替换值保持长度、字符类别和标点结构。
+  const shaped = masked as typeof payload;
+  assert.equal(shaped.system.length, payload.system.length);
+  assert.match(shaped.system, /^用户 [\u4e00-\u9fa5]{2}$/);
+  assert.match(
+    shaped.messages[0].content,
+    /^[a-z]{5}:\/\/[a-z]+\.[a-z]+\/[a-z]$/,
+  );
+  assert.match(shaped.messages[1].content, /^[a-z]{4}-[a-z]{8} and \d{11}$/);
 });
 
 test("same value reuses random token, parallel scans agree and tokens are idempotent", async (t) => {
@@ -135,8 +144,8 @@ test("same value reuses random token, parallel scans agree and tokens are idempo
   assert.equal(await engine.redact(a), a);
   const other = (await fixture(t, ["secret"])).engine;
   assert.notEqual(await other.redact("secret"), a);
-  const fabricated = `__PIP_${"a".repeat(48)}__`;
-  assert.equal(engine.restoreText(fabricated), fabricated);
+  // Unknown text is never restored, only recorded replacements are. / 未知文本不还原，仅还原已记录的替换值。
+  assert.equal(engine.restoreText("unrelated-value"), "unrelated-value");
 });
 
 test("regex captures replace only full match, retain exact case, and handle overlapping rules", async (t) => {
@@ -147,11 +156,9 @@ test("regex captures replace only full match, retain exact case, and handle over
   ]);
   const input = "abcde Bearer SeCrEt Bearer OTHER";
   const masked = (await engine.redact(input)) as string;
-  assert.equal(
-    masked.replace(/__PIP_[a-f0-9]{48}__/g, "TOKEN"),
-    "TOKEN Bearer TOKEN Bearer TOKEN",
-  );
-  assert.ok(masked.includes("Bearer "));
+  // Case pattern and word boundaries survive; only letters change. / 保留大小写形态与边界，仅替换字母。
+  assert.match(masked, /^[a-z]{5} Bearer [A-Za-z]{6} Bearer [A-Z]{5}$/);
+  assert.notEqual(masked, input);
   assert.equal(engine.restoreText(masked), input);
 });
 
@@ -179,20 +186,33 @@ test("JSON-encoded arguments unescape sensitive values before matching", async (
   });
 });
 
-test("rules spanning JSON syntax reject rather than silently bypass matching", async (t) => {
+test("rules spanning JSON syntax keep the argument parseable / 跨 JSON 语法的规则仍保持可解析", async (t) => {
   const { engine } = await fixture(t, ['{"pin":"1234"}']);
-  await assert.rejects(engine.redact({ arguments: '{"pin":"1234"}' }));
+  const masked = (await engine.redact({ arguments: '{"pin":"1234"}' })) as {
+    arguments: string;
+  };
+  // Punctuation is preserved, so the embedded JSON still parses. / 标点保留，内嵌 JSON 仍可解析。
+  assert.notEqual(masked.arguments, '{"pin":"1234"}');
+  const parsed = JSON.parse(masked.arguments);
+  assert.equal(Object.keys(parsed).length, 1);
+  assert.match(Object.keys(parsed)[0], /^[a-z]{3}$/);
+  assert.match(String(Object.values(parsed)[0]), /^\d{4}$/);
+  assert.equal(engine.restoreText(masked.arguments), '{"pin":"1234"}');
 });
 
 test("numeric IDs, unicode, full config and prototype keys", async (t) => {
   const { engine, path } = await fixture(t, ["13800138000", "姓名😀"]);
   const numeric = (await engine.redact({ number: 13800138000 })) as {
-    number: string;
+    number: number;
   };
-  assert.match(numeric.number, /^__PIP_/);
+  // A numeric field must stay a number with the same digit count. / 数值字段保持数字类型与位数。
+  assert.equal(typeof numeric.number, "number");
+  assert.equal(String(numeric.number).length, "13800138000".length);
+  assert.notEqual(numeric.number, 13800138000);
+  assert.equal(engine.restoreText(String(numeric.number)), "13800138000");
   const raw = readFileSync(path, "utf8");
   const masked = (await engine.redact(raw)) as string;
-  assert.match(masked, /^__PIP_/);
+  assert.notEqual(masked, raw);
   assert.equal(engine.restoreText(masked), raw);
   const object = JSON.parse('{"__proto__":"姓名😀"}');
   const roundtrip = engine.restore(await engine.redact(object)) as Record<

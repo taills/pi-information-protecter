@@ -1,5 +1,34 @@
 # Changelog / 更新日志
 
+## 0.6.0 — Shape-preserving replacements and single-language messages / 同形替换与单语言消息
+
+### Changed / 变更
+
+- **Breaking:** replace matches with random values of the same shape instead of `__PIP_<hex>__` tokens, preserving length, case pattern, digits and punctuation positions so tool schemas, URLs, emails and embedded JSON stay valid.
+  **破坏性变更：**命中内容改为同形随机值而非占位符，保留长度、大小写形态、数字和标点位置，使工具结构、URL、邮箱和内嵌 JSON 仍然有效。
+- Keep numeric JSON values as numbers with the same digit count and safe-integer range, fixing provider errors such as `'9007199254740991' is not of type 'number'`.
+  数值型 JSON 字段保持数字类型、位数和安全整数范围，修复类似 `'9007199254740991' is not of type 'number'` 的提供商错误。
+- Replace characters within their own writing system, covering Latin with diacritics, Vietnamese, Greek, Cyrillic, Hebrew, Arabic, Thai, Hiragana, Katakana, Hangul and CJK; punctuation, whitespace, emoji and unknown code points stay unchanged.
+  在各自文字体系内替换字符，覆盖带重音拉丁字母、越南语、希腊语、西里尔语、希伯来语、阿拉伯语、泰语、平假名、片假名、谚文及汉字；标点、空白、表情和未知码位保持不变。
+- **Breaking:** render every notification, prompt and diagnostic in one language selected from `PI_PROTECTER_LANG`, `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE` or the runtime locale, instead of pairing English and Chinese in the same string; codes, stages and numeric details stay language-neutral.
+  **破坏性变更：**通知、提示和诊断改为单一语言，按上述环境变量或运行时区域选择，不再在同一字符串中并列中英文；错误码、阶段和数值细节保持语言无关。
+- Format counts with `Intl.PluralRules` and `Intl.NumberFormat` so quantities read naturally in each language.
+  使用 `Intl.PluralRules` 和 `Intl.NumberFormat` 格式化数量，使各语言表达自然。
+
+### Added / 新增
+
+- Add `SCAN_NUMBER_UNSAFE` and `SCAN_UNIQUE_FAILED` diagnostics so numbers that cannot round-trip and matches with no unique replacement fail closed instead of corrupting a request.
+  新增两个诊断码，使无法精确往返的数值和无唯一替换值的匹配拒绝放行，而不破坏请求。
+- Add `RESTORE_COMPLEXITY` and `RESTORE_KEY_COLLISION` diagnostics for oversized or ambiguous restoration input.
+  为过深或歧义的还原输入新增两个诊断码。
+- Add regressions for numeric type preservation, per-script shapes, punctuation and emoji layout, collision avoidance, fail-closed paths and locale selection.
+  新增回归，覆盖数值类型保持、各文字体系同形、标点与表情布局、冲突避免、失败拒绝路径及语言选择。
+
+### Security / 安全
+
+- Document that shape-preserving values leak length, character class and punctuation structure, look like plausible data, and may be restored when a model independently emits the same short string; prefer long, distinctive targets.
+  文档说明同形值会泄露长度、字符类别和标点结构，看似真实数据，且模型自行输出相同短字符串时可能被还原，应优先使用较长且有辨识度的目标。
+
 ## 0.5.0 — Actionable block diagnostics / 可定位的拦截诊断
 
 - Replace the single generic block message with a stable code, failing stage, reason and suggested action across initialization, configuration, migration, request, scan, worker and audit paths.

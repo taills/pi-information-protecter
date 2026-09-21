@@ -1,0 +1,183 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Protecter } from "../src/engine.ts";
+import { type Rule } from "../src/config.ts";
+
+async function fixture(t: { after(fn: () => void): void }, rules: Rule[]) {
+  const dir = fs.mkdtempSync(join(tmpdir(), "spi-shape-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.writeFileSync(
+    join(dir, "protecter.json"),
+    JSON.stringify({ version: 1, sensitiveWords: rules }),
+  );
+  const engine = new Protecter(dir, 2000, () => "a".repeat(32));
+  t.after(() => engine.close());
+  await engine.initialize();
+  return { engine };
+}
+
+function codeOf(action: Promise<unknown>): Promise<string> {
+  return action.then(
+    () => "NO_ERROR",
+    (error) =>
+      (error as Error).message.match(/code=([A-Z_]+)/)?.[1] ?? "UNPARSED",
+  );
+}
+
+test("numeric schema values stay numbers / 数值型结构字段保持数字类型", async (t) => {
+  // Reproduces the reported provider error: a numeric limit became a string.
+  // 复现上报的提供商错误：数值上限被替换成字符串。
+  const { engine } = await fixture(t, [
+    { type: "regex", pattern: "(?<!\\d)\\d{10,19}(?!\\d)" },
+  ]);
+  const payload = {
+    tools: [
+      {
+        name: "playwright_browser_network_request",
+        parameters: {
+          properties: { index: { type: "integer", maximum: 9007199254740991 } },
+        },
+      },
+    ],
+  };
+  const masked = (await engine.redact(payload, "anthropic")) as typeof payload;
+  const limit = masked.tools[0].parameters.properties.index.maximum;
+  assert.equal(typeof limit, "number");
+  assert.ok(Number.isSafeInteger(limit));
+  assert.equal(String(limit).length, 16);
+  assert.notEqual(limit, 9007199254740991);
+  // The payload still serializes and parses as the same JSON types.
+  // 请求体仍可序列化并解析为相同的 JSON 类型。
+  assert.equal(
+    typeof JSON.parse(JSON.stringify(masked)).tools[0].parameters.properties
+      .index.maximum,
+    "number",
+  );
+  assert.equal(engine.restoreText(String(limit)), "9007199254740991");
+});
+
+test("digit runs keep length and leading zeros / 数字串保持长度与前导零", async (t) => {
+  const { engine } = await fixture(t, [
+    { type: "regex", pattern: "(?<!\\d)\\d{6,}(?!\\d)" },
+  ]);
+  const masked = (await engine.redact({
+    id: "000123456",
+    phone: "13800138000",
+    text: "order 987654 shipped",
+  })) as Record<string, string>;
+  // In string context every digit is replaced, so zero positions stay private.
+  // 字符串上下文中每位数字都替换，不泄露零的位置。
+  assert.match(masked.id, /^\d{9}$/);
+  assert.notEqual(masked.id, "000123456");
+  assert.equal(engine.restoreText(masked.id), "000123456");
+  assert.equal(masked.phone.length, 11);
+  assert.match(masked.phone, /^\d{11}$/);
+  assert.match(masked.text, /^order \d{6} shipped$/);
+  assert.notEqual(masked.phone, "13800138000");
+  assert.equal(engine.restoreText(masked.phone), "13800138000");
+});
+
+test("scripts are replaced within their own writing system / 各文字体系内替换", async (t) => {
+  const samples = {
+    chinese: "张三李四",
+    japaneseHiragana: "ひらがな",
+    japaneseKatakana: "カタカナ",
+    korean: "홍길동",
+    cyrillic: "Иванов",
+    greek: "Παπαδόπουλος",
+    vietnamese: "Nguyễn Văn Tèo",
+    thai: "สมชาย",
+    arabic: "محمد",
+  };
+  const { engine } = await fixture(t, Object.values(samples));
+  const masked = (await engine.redact({ ...samples })) as typeof samples;
+  const ranges: Record<keyof typeof samples, RegExp> = {
+    chinese: /^[\u4e00-\u9fa5]{4}$/,
+    japaneseHiragana: /^[\u3041-\u3096]{4}$/,
+    japaneseKatakana: /^[\u30a1-\u30fa]{4}$/,
+    korean: /^[\uac00-\ud7a3]{3}$/,
+    cyrillic: /^[\u0410-\u044f]{6}$/,
+    greek: /^[\u0391-\u03ce]{12}$/,
+    vietnamese:
+      /^[A-Za-z\u00c0-\u017f\u1e00-\u1eff]+ [A-Za-z\u00c0-\u017f\u1e00-\u1eff]+ [A-Za-z\u00c0-\u017f\u1e00-\u1eff]+$/,
+    thai: /^[\u0e01-\u0e2e\u0e30-\u0e3a\u0e40-\u0e4e]{5}$/,
+    arabic: /^[\u0621-\u064a]{4}$/,
+  };
+  for (const key of Object.keys(samples) as (keyof typeof samples)[]) {
+    assert.match(masked[key], ranges[key], `${key}: ${masked[key]}`);
+    assert.equal(
+      [...masked[key]].length,
+      [...samples[key]].length,
+      `${key} length`,
+    );
+    assert.notEqual(masked[key], samples[key], `${key} unchanged`);
+    assert.equal(engine.restoreText(masked[key]), samples[key]);
+  }
+  // Spaces inside Vietnamese names are structure, not content. / 越南语姓名中的空格属于结构而非内容。
+  assert.equal(masked.vietnamese.split(" ").length, 3);
+});
+
+test("punctuation, emoji and case layout survive / 标点、表情与大小写结构保持", async (t) => {
+  const original = "Alex.Morgan+tag@Example.COM 😀 (ID-42)";
+  const { engine } = await fixture(t, [original]);
+  const masked = (await engine.redact(original)) as string;
+  assert.notEqual(masked, original);
+  assert.equal(masked.length, original.length);
+  assert.ok(masked.includes("😀"));
+  // Each non-letter, non-digit character keeps its position. / 非字母数字字符位置不变。
+  for (const [index, char] of [...original].entries()) {
+    if (!/[\p{L}\p{Nd}]/u.test(char))
+      assert.equal([...masked][index], char, `position ${index}`);
+  }
+  assert.match(masked, /^[A-Z][a-z]{3}\.[A-Z][a-z]{5}\+[a-z]{3}@/);
+  assert.equal(engine.restoreText(masked), original);
+});
+
+test("replacements never collide with payload content / 替换值不与请求内容冲突", async (t) => {
+  const { engine } = await fixture(t, ["secret"]);
+  const masked = (await engine.redact({
+    a: "secret",
+    b: "aaaaaa bbbbbb cccccc",
+  })) as Record<string, string>;
+  assert.notEqual(masked.a, "secret");
+  assert.ok(!["aaaaaa", "bbbbbb", "cccccc"].includes(masked.a));
+  assert.equal(masked.b, "aaaaaa bbbbbb cccccc");
+  assert.equal(engine.restoreText(masked.a), "secret");
+});
+
+test("exhausted and unsafe shapes fail closed / 无可用形状或数值不安全时拒绝放行", async (t) => {
+  // Every single-digit candidate already appears, so uniqueness is impossible.
+  // 所有单位数候选都已出现，无法生成唯一值。
+  const digits = await fixture(t, [{ type: "regex", pattern: "(?<=pin )\\d" }]);
+  assert.equal(
+    await codeOf(digits.engine.redact({ all: "0123456789", v: "pin 7" })),
+    "SCAN_UNIQUE_FAILED",
+  );
+
+  // Replacing an exponent letter would stop the value being a valid number.
+  // 替换指数字母会使数值不再有效。
+  const exponent = await fixture(t, [{ type: "regex", pattern: "e" }]);
+  assert.equal(
+    await codeOf(exponent.engine.redact({ big: 1e21 })),
+    "SCAN_NUMBER_UNSAFE",
+  );
+});
+
+test("repeat requests reuse the same shaped value / 重复请求复用同一同形值", async (t) => {
+  const { engine } = await fixture(t, ["13800138000", "张三"]);
+  const first = (await engine.redact({
+    phone: "13800138000",
+    name: "张三",
+  })) as Record<string, string>;
+  const second = (await engine.redact({
+    phone: "13800138000",
+    name: "张三",
+  })) as Record<string, string>;
+  assert.deepEqual(second, first);
+  // A restored response is masked back to the same value on the next request.
+  // 还原后的响应在下一次请求中会被替换回同一值。
+  assert.equal(await engine.redact("张三"), first.name);
+});

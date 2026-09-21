@@ -1,15 +1,13 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-
-export const MACHINE_ERROR =
-  "SPI Protecter: machine ID unavailable / 无法获取机器标识。";
+import { failure } from "./diagnostics.ts";
 
 /** Normalize OS identifiers without exposing them. / 规范化系统标识，不向外暴露。 */
 export function machineHash(id: string): string {
   const normalized = id.trim().toLowerCase().replace(/-/g, "");
   if (!/^[a-f0-9]{32}$/.test(normalized) || /^0+$/.test(normalized))
-    throw new Error(MACHINE_ERROR);
+    throw failure("MACHINE_ID");
   return createHash("sha256")
     .update(`pi-information-protecter:v1:${normalized}`)
     .digest("hex")
@@ -60,5 +58,5 @@ export function getMachineHash(): string {
   } catch {
     /* Do not expose command output. / 不暴露命令输出。 */
   }
-  throw new Error(MACHINE_ERROR);
+  throw failure("MACHINE_ID");
 }

@@ -82,6 +82,31 @@ Targets are literal text, not replacement templates: `$1` and `$&` are not expan
 
 For reversible protection, duplicate targets across different rules, substring-overlapping targets, targets containing configured sensitive values, reserved `__PIP_` names and conflicting definitions are rejected. A fixed regex can represent only one distinct matched original per instance; a second distinct original rejects the request. Partially overlapping matches involving fixed rules also reject rather than silently choose a rule or expose a suffix. Pure random-rule overlaps still merge. Migration preserves targets and refuses conflicting merges without deleting originals. Reload after editing; older plugin versions do not support this field.
 
+### Shape-preserving replacements
+
+Since 0.6.0 a matched value is replaced by a random value of the **same shape** instead of an opaque token, so requests stay schema-valid:
+
+| Original | Replacement | Preserved |
+| --- | --- | --- |
+| `9007199254740991` (number) | `2844008842109708` (number) | JSON type, digit count, safe-integer range |
+| `13800138000` | `06864831332` | length, digits only |
+| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` | length, case pattern, punctuation positions |
+| `张三` | `丅欕` | CJK script, character count |
+| `Nguyễn Văn Tèo` | `Ufefṉg Zżt Sàb` | Latin with diacritics, word boundaries |
+| `ひらがな` | `ゅせはっ` | Hiragana |
+
+This fixes provider errors such as `'9007199254740991' is not of type 'number'`, which happened when a numeric field was replaced by a token string. Numeric JSON values stay numbers, keep their digit count and remain safe integers. If a partial match cannot round-trip as a number, the request is blocked with `SCAN_NUMBER_UNSAFE` instead of sending an invalid type.
+
+Letters and digits are replaced inside their own writing system: ASCII, Latin-1, Latin Extended-A, Latin Extended Additional (including Vietnamese), Greek, Cyrillic, Hebrew, Arabic, Thai, Hiragana, Katakana, Hangul and CJK. Punctuation, whitespace, emoji, symbols and code points outside these ranges are kept unchanged, which is what keeps URLs, emails and embedded JSON parseable.
+
+**This is a deliberate trade-off.** An opaque token revealed only that a redaction happened; a shape-preserving value also reveals length, character classes and punctuation structure, and it looks like plausible real data to the model. Text in unsupported scripts is preserved as-is, so a rule matching such text may leave part of it visible.
+
+Replacements are checked so restoration stays exact: a candidate is rejected if it equals the original, is already mapped, or already appears anywhere in the same request. When no unique candidate can be produced, typically for very short matches, the request is blocked with `SCAN_UNIQUE_FAILED`. Because a shaped value is indistinguishable from ordinary content, a model that independently emits the same short string will have it restored to the original, so prefer rules that match longer, distinctive values.
+
+### Message language
+
+All notifications, prompts and diagnostics render in a single language, chosen from the environment: `PI_PROTECTER_LANG`, then `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE`, then the runtime locale. `zh*` selects Simplified Chinese; anything else falls back to English. Set `PI_PROTECTER_LANG=en` or `PI_PROTECTER_LANG=zh` to override. Error codes, stages and numeric details stay language-neutral so they can be searched and reported.
+
 ### Multi-turn consistency and prompt caching
 
 Random placeholders are generated once per exact original and reused within the same extension instance, including after local response restoration. Starting another scan worker does not reset the mapping. This supports stable prompt prefixes but does not guarantee provider KV-cache hits; model, tools, message ordering, cache lifetime and routing also matter. `/reload`, process restart and session-instance replacement clear mappings. Different processes do not share mappings, and audit timestamps/request IDs are never included in the model payload.
@@ -103,16 +128,16 @@ Use `/protecter logs clear` to empty only the current machine's audit log. Local
 When a request is blocked, the notification names the failing stage, a stable code and a suggested action instead of one generic message:
 
 ```text
-SPI Protecter blocked this request / 已阻止该请求
+SPI Protecter blocked this request
 code=CONFIG_EMPTY_MATCH stage=configuration rule=1
-Reason / 原因: Regex matches an empty string / 正则匹配空字符串
-Action / 处理: Require a non-empty match in the numbered rule / 修改指定规则，要求非空匹配
-Details / 详情: /protecter status
+Reason: Regex matches an empty string
+Action: Require a non-empty match in the numbered rule
+Details: /protecter status
 ```
 
 Stages are `initialization`, `configuration`, `migration`, `request`, `scan`, `worker`, `audit` and `internal`. Coordinates appear only when known: `rule` and `otherRule` are 1-based indexes into `sensitiveWords`, `node` counts scanned payload nodes, `bytes`/`limit`/`timeoutMs` report the exceeded limit, and `errno` is the OS error code.
 
-Common codes include `CONFIG_JSON`, `CONFIG_SCHEMA`, `CONFIG_REGEX`, `CONFIG_TARGET`, `CONFIG_CONFLICT`, `CONFIG_EMPTY_MATCH`, `CONFIG_SENSITIVE_TARGET`, `CONFIG_ALIAS_CONFLICT`, `CONFIG_UNSAFE`, `MIGRATION_LOCKED`, `MIGRATION_CHANGED`, `PAYLOAD_JSON`, `PAYLOAD_SIZE`, `SCAN_TIMEOUT`, `SCAN_MATCH_LIMIT`, `SCAN_COMPLEXITY`, `SCAN_ATTACHMENT`, `SCAN_JSON_REWRITE`, `FIXED_OVERLAP`, `FIXED_ALIAS_REUSED`, `AUDIT_FULL`, `AUDIT_PARTIAL`, `AUDIT_LOCKED`, `AUDIT_UNSAFE` and `WORKER_FAILED`.
+Common codes include `CONFIG_JSON`, `CONFIG_SCHEMA`, `CONFIG_REGEX`, `CONFIG_TARGET`, `CONFIG_CONFLICT`, `CONFIG_EMPTY_MATCH`, `CONFIG_SENSITIVE_TARGET`, `CONFIG_ALIAS_CONFLICT`, `CONFIG_UNSAFE`, `MIGRATION_LOCKED`, `MIGRATION_CHANGED`, `PAYLOAD_JSON`, `PAYLOAD_SIZE`, `SCAN_TIMEOUT`, `SCAN_MATCH_LIMIT`, `SCAN_COMPLEXITY`, `SCAN_ATTACHMENT`, `SCAN_JSON_REWRITE`, `SCAN_NUMBER_UNSAFE`, `SCAN_UNIQUE_FAILED`, `FIXED_OVERLAP`, `FIXED_ALIAS_REUSED`, `AUDIT_FULL`, `AUDIT_PARTIAL`, `AUDIT_LOCKED`, `AUDIT_UNSAFE` and `WORKER_FAILED`.
 
 Notifications can scroll away, so `/protecter status` repeats the last recorded block for the session, and a tool blocked while protection is unavailable reports the same cause. Requests still fail closed: the outgoing payload is replaced with `{}`.
 
@@ -125,13 +150,13 @@ Input / history / tools / system prompt / tool definitions
                          ↓
 before_provider_request: final JSON text scan
                          ↓
-__PIP_<192-bit random hex>__ → LLM gateway
+shape-preserving random value → LLM gateway
                          ↓
 Local response and tool-argument restoration
 ```
 
 1. Scan JSON strings, keys and numbers, including decoded JSON-string tool arguments. Local user input and original history are unchanged.
-2. Generate tokens with `crypto.randomBytes(24)`. Runtime mappings stay in memory and are not restored across restarts. **Since 0.3.0, successful original/token pairs are also persisted in the private audit log.** They are never injected into configuration, session custom entries or model prompts.
+2. Generate a shape-preserving replacement with `crypto.randomBytes`. Runtime mappings stay in memory and are not restored across restarts. **Since 0.3.0, successful original/replacement pairs are also persisted in the private audit log.** They are never injected into configuration, session custom entries or model prompts.
 3. Restore finalized assistant text, thinking and tool arguments. The TUI Markdown transformer restores complete streamed tokens; partial tokens may briefly appear. RPC/JSON deltas remain masked until final `message_end`. Altered or truncated tokens cannot be restored.
 4. Restore tool arguments before execution so legitimate local operations use original values; redact them again on subsequent requests. **Restoring credentials is not tool authorization or exfiltration prevention.**
 5. Execute regex scans in a terminable worker. On failure, return `{}` and request cancellation rather than relying on hook exceptions swallowed by Pi. An empty request or provider validation error may still occur, but the handler does not return the original payload.
@@ -253,6 +278,31 @@ pi -e ./src/index.ts
 
 为保持可逆保护，不同规则复用相同目标、目标互为子串、目标包含配置敏感值、使用保留 `__PIP_` 名称或定义冲突时拒绝加载。固定正则在同一实例中只能表示一种不同的匹配原文，第二种原文会导致请求被拒绝。涉及固定规则的部分重叠匹配也拒绝，不静默选择规则或泄漏后缀；纯随机规则重叠仍合并。迁移保留固定目标，遇到冲突停止且不删除原文件。修改后请重载；旧插件版本不支持此字段。
 
+### 同形替换
+
+从 0.6.0 起，命中内容不再替换为不透明占位符，而是替换为**同形**随机值，使请求保持结构有效：
+
+| 原文 | 替换值 | 保留特征 |
+| --- | --- | --- |
+| `9007199254740991`（数字） | `2844008842109708`（数字） | JSON 类型、位数、安全整数范围 |
+| `13800138000` | `06864831332` | 长度、纯数字 |
+| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` | 长度、大小写形态、标点位置 |
+| `张三` | `丅欕` | 汉字体系、字数 |
+| `Nguyễn Văn Tèo` | `Ufefṉg Zżt Sàb` | 带重音拉丁字母、词边界 |
+| `ひらがな` | `ゅせはっ` | 平假名 |
+
+这修复了类似 `'9007199254740991' is not of type 'number'` 的提供商错误：过去数值字段会被替换成字符串占位符。现在数值仍为数字，位数不变并保持安全整数；若部分匹配无法作为数字精确往返，则以 `SCAN_NUMBER_UNSAFE` 拦截，而不发送错误类型。
+
+字母和数字在各自文字体系内替换：ASCII、Latin-1、Latin Extended-A、Latin Extended Additional（含越南语）、希腊语、西里尔语、希伯来语、阿拉伯语、泰语、平假名、片假名、谚文及汉字。标点、空白、表情、符号以及上述范围之外的码位保持不变，这正是 URL、邮箱和内嵌 JSON 仍可解析的原因。
+
+**这是有意为之的权衡。** 不透明占位符仅暴露“发生了脱敏”；同形值还会暴露长度、字符类别和标点结构，并且在模型看来像真实数据。不支持的文字体系会原样保留，因此匹配这类文本的规则可能残留部分可见内容。
+
+为保证还原精确，候选值会被校验：与原文相同、已被占用、或已出现在同一请求中的候选值会被拒绝。无法生成唯一值时（通常是极短匹配），以 `SCAN_UNIQUE_FAILED` 拦截请求。由于同形值与普通内容难以区分，若模型自行输出了相同的短字符串，它会被还原为原文，因此应优先匹配更长、更有辨识度的值。
+
+### 消息语言
+
+所有通知、提示和诊断仅以**单一语言**呈现，语言按环境变量依次选取：`PI_PROTECTER_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`，最后是运行时区域。`zh*` 选择简体中文，其余回退英文。可设置 `PI_PROTECTER_LANG=en` 或 `PI_PROTECTER_LANG=zh` 覆盖。错误码、阶段和数值细节保持语言无关，便于搜索和反馈。
+
 ### 多轮一致性与提示词缓存
 
 随机占位符按精确原文首次生成，在同一扩展实例内持续复用，包括本地回复还原后的再次脱敏；新建扫描 worker 不会重置映射。这有助于前缀稳定，但不保证提供商 KV Cache 命中，模型、工具、消息顺序、缓存有效期和路由也有影响。重载、进程重启和会话实例替换会清除映射；不同进程不共享映射，审计时间和请求 ID 不进入模型请求体。
@@ -274,16 +324,16 @@ pi -e ./src/index.ts
 请求被拦截时，提示不再是单一笼统信息，而是给出失败阶段、稳定错误码和处理建议：
 
 ```text
-SPI Protecter blocked this request / 已阻止该请求
+SPI Protecter 已阻止该请求
 code=CONFIG_EMPTY_MATCH stage=configuration rule=1
-Reason / 原因: Regex matches an empty string / 正则匹配空字符串
-Action / 处理: Require a non-empty match in the numbered rule / 修改指定规则，要求非空匹配
-Details / 详情: /protecter status
+原因：正则匹配空字符串
+处理：修改指定规则，要求非空匹配
+详情：/protecter status
 ```
 
 阶段包括初始化、配置、迁移、请求、扇描、worker、审计和内部错误。定位信息仅在已知时输出：`rule` 和 `otherRule` 是敏感词数组中从 1 开始的序号，`node` 为已扫描节点数，`bytes`、`limit`、`timeoutMs` 说明超限情况，`errno` 为系统错误码。
 
-常见错误码包括 `CONFIG_JSON`、`CONFIG_SCHEMA`、`CONFIG_REGEX`、`CONFIG_TARGET`、`CONFIG_CONFLICT`、`CONFIG_EMPTY_MATCH`、`CONFIG_SENSITIVE_TARGET`、`CONFIG_ALIAS_CONFLICT`、`CONFIG_UNSAFE`、`MIGRATION_LOCKED`、`MIGRATION_CHANGED`、`PAYLOAD_JSON`、`PAYLOAD_SIZE`、`SCAN_TIMEOUT`、`SCAN_MATCH_LIMIT`、`SCAN_COMPLEXITY`、`SCAN_ATTACHMENT`、`SCAN_JSON_REWRITE`、`FIXED_OVERLAP`、`FIXED_ALIAS_REUSED`、`AUDIT_FULL`、`AUDIT_PARTIAL`、`AUDIT_LOCKED`、`AUDIT_UNSAFE` 和 `WORKER_FAILED`。
+常见错误码包括 `CONFIG_JSON`、`CONFIG_SCHEMA`、`CONFIG_REGEX`、`CONFIG_TARGET`、`CONFIG_CONFLICT`、`CONFIG_EMPTY_MATCH`、`CONFIG_SENSITIVE_TARGET`、`CONFIG_ALIAS_CONFLICT`、`CONFIG_UNSAFE`、`MIGRATION_LOCKED`、`MIGRATION_CHANGED`、`PAYLOAD_JSON`、`PAYLOAD_SIZE`、`SCAN_TIMEOUT`、`SCAN_MATCH_LIMIT`、`SCAN_COMPLEXITY`、`SCAN_ATTACHMENT`、`SCAN_JSON_REWRITE`、`SCAN_NUMBER_UNSAFE`、`SCAN_UNIQUE_FAILED`、`FIXED_OVERLAP`、`FIXED_ALIAS_REUSED`、`AUDIT_FULL`、`AUDIT_PARTIAL`、`AUDIT_LOCKED`、`AUDIT_UNSAFE` 和 `WORKER_FAILED`。
 
 通知可能消失，因此 `/protecter status` 会重新展示本会话最近一次拦截；防护不可用时被拦截的工具也会报告同一原因。请求仍然失败不放行：出站请求体会被替换为 `{}`。
 
@@ -296,13 +346,13 @@ Details / 详情: /protecter status
                          ↓
 before_provider_request：最终 JSON 文本扫描
                          ↓
-__PIP_<192-bit 随机十六进制>__ → LLM 网关
+同形随机值 → LLM 网关
                          ↓
 本地回复和工具参数还原
 ```
 
 1. 扫描 JSON 字符串、键和数字，包括解码后的 JSON 字符串工具参数；不修改本地用户输入和历史原文。
-2. 使用 `crypto.randomBytes(24)` 生成占位符。运行时映射保存在内存，不跨重启恢复。**从 0.3.0 起，成功替换的原文和占位符也会持久化到私有审计日志。** 不注入配置、会话自定义条目或模型提示。
+2. 使用 `crypto.randomBytes` 生成同形替换值。运行时映射保存在内存，不跨重启恢复。**从 0.3.0 起，成功替换的原文和占位符也会持久化到私有审计日志。** 不注入配置、会话自定义条目或模型提示。
 3. 还原最终 assistant 文本、思考内容和工具参数。TUI 在完整占位符到达后还原，片段可能短暂显示；RPC/JSON 增量仍脱敏，直到最终消息还原。被改写或截断的占位符无法还原。
 4. 工具执行前还原参数，让合法本地操作使用原值；后续请求再次脱敏。**凭证还原不等于工具授权或防外传。**
 5. 正则扫描运行于可终止 worker。失败时返回 `{}` 并请求取消，不依赖被 Pi 吞掉的钩子异常；仍可能产生空请求或提供商校验错误，但处理器不返回原始请求体。

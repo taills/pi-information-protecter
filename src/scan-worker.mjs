@@ -1,7 +1,7 @@
 // A separate worker bounds user-supplied JavaScript regex execution (including ReDoS).
 // 独立 worker 限制用户正则的执行时间，包括正则拒绝服务风险。
 import { parentPort, workerData } from "node:worker_threads";
-import { randomBytes } from "node:crypto";
+import { numericRoundTrips, reshapeInteger, reshapeText } from "./shape.mjs";
 
 // Track the active rule/node so blocks can be located without exposing content.
 // 记录当前规则和节点，使拦截可定位而不暴露内容。
@@ -23,7 +23,11 @@ try {
     const index = position + 1;
     if (typeof rule === "string") return { literal: rule, rule: index };
     if (rule.type === "literal")
-      return { literal: rule.value, replacement: rule.replacement, rule: index };
+      return {
+        literal: rule.value,
+        replacement: rule.replacement,
+        rule: index,
+      };
     return {
       rule: index,
       replacement: rule.replacement,
@@ -50,7 +54,28 @@ try {
   const payloadText = JSON.stringify(payload);
   let matches = 0;
   let nodes = 0;
-  function tokenFor(original, replacement) {
+  /**
+   * Shape-preserving values keep JSON types valid but must stay unambiguous.
+   * 同形替换保持 JSON 类型有效，但必须保证映射无歧义。
+   */
+  function generate(original, numeric) {
+    for (let attempt = 0; attempt < 64; attempt++) {
+      const candidate =
+        numeric && /^\d+$/.test(original)
+          ? reshapeInteger(original)
+          : reshapeText(original);
+      if (!candidate || candidate === original) continue;
+      // Reject values already meaningful elsewhere, so restoration stays exact.
+      // 拒绝已在别处出现的值，确保还原精确。
+      if (tokenToOriginal.has(candidate)) continue;
+      if (originalToToken.has(candidate)) continue;
+      if (payloadText.includes(candidate)) continue;
+      return candidate;
+    }
+    return undefined;
+  }
+
+  function tokenFor(original, replacement, numeric = false) {
     let token = originalToToken.get(original);
     if (token) {
       if (replacement !== undefined && token !== replacement)
@@ -71,15 +96,14 @@ try {
       return replacement;
     }
     if (tokenToOriginal.size >= 50000) fail("SCAN_MAPPING_LIMIT");
-    do {
-      token = `__PIP_${randomBytes(24).toString("hex")}__`;
-    } while (tokenToOriginal.has(token) || payloadText.includes(token));
+    token = generate(original, numeric);
+    if (!token) fail("SCAN_UNIQUE_FAILED");
     originalToToken.set(original, token);
     tokenToOriginal.set(token, original);
     additions.push([token, original]);
     return token;
   }
-  function redactPlain(text) {
+  function redactPlain(text, numeric = false) {
     const spans = [];
     for (const matcher of matchers) {
       activeRule = matcher.rule;
@@ -136,27 +160,26 @@ try {
       cursor = 0;
     for (const [start, end, replacement, rule] of merged) {
       activeRule = rule;
-      const token = tokenFor(text.slice(start, end), replacement);
+      const token = tokenFor(text.slice(start, end), replacement, numeric);
       hitTokens.add(token);
       result += text.slice(cursor, start) + token;
       cursor = end;
     }
     return result + text.slice(cursor);
   }
-  function redact(text) {
-    // Only OUR tokens are exempt, not arbitrary strings with a similar prefix.
-    // 仅豁免本实例生成的占位符，不豁免具有相似前缀的任意字符串。
+  function redact(text, numeric = false) {
+    // Existing replacements must never be redacted again, or restoration breaks.
+    // 已有替换值不能再次脱敏，否则无法还原。
     let result = "",
       cursor = 0;
     const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const fixedTokens = [...tokenToOriginal.keys()].filter(
-      (token) => !/^__PIP_[a-f0-9]{48}__$/.test(token),
-    );
+    const fixedTokens = [...tokenToOriginal.keys()];
+    if (!fixedTokens.length) return redactPlain(text, numeric);
     const pattern = new RegExp(
-      [
-        "__PIP_[a-f0-9]{48}__",
-        ...fixedTokens.sort((a, b) => b.length - a.length).map(escape),
-      ].join("|"),
+      fixedTokens
+        .sort((a, b) => b.length - a.length)
+        .map(escape)
+        .join("|"),
       "g",
     );
     const protectedSpans = [...text.matchAll(pattern)].filter((match) =>
@@ -184,10 +207,11 @@ try {
     }
     for (const match of protectedSpans) {
       if (!tokenToOriginal.has(match[0])) continue;
-      result += redactPlain(text.slice(cursor, match.index)) + match[0];
+      result +=
+        redactPlain(text.slice(cursor, match.index), numeric) + match[0];
       cursor = match.index + match[0].length;
     }
-    return result + redactPlain(text.slice(cursor));
+    return result + redactPlain(text.slice(cursor), numeric);
   }
   function walk(value, depth = 0) {
     activeNode = ++nodes;
@@ -224,8 +248,13 @@ try {
       return redact(value);
     }
     if (typeof value === "number") {
-      const transformed = redact(String(value));
-      return transformed === String(value) ? value : transformed;
+      const text = String(value);
+      const transformed = redact(text, true);
+      if (transformed === text) return value;
+      // A numeric field must stay a number, or the provider rejects the schema.
+      // 数值字段必须仍为数字，否则提供商会拒绝该结构。
+      if (!numericRoundTrips(transformed)) fail("SCAN_NUMBER_UNSAFE");
+      return Number(transformed);
     }
     if (Array.isArray(value)) return value.map((item) => walk(item, depth + 1));
     if (value && typeof value === "object") {

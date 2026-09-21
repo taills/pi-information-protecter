@@ -11,12 +11,16 @@ import {
   sanitizeError,
   type Diagnostic,
 } from "./diagnostics.ts";
+import { count, detectLocale, setLocale, t } from "./locale.ts";
 
 /**
  * Explicitly install this after other extensions that rewrite outgoing payloads.
  * 请将本扩展放在其他改写出站请求体的扩展之后加载。
  */
 export default function informationProtecter(pi: ExtensionAPI): void {
+  // One language per environment; messages never show two languages at once.
+  // 每个环境只用一种语言，不同时展示两种语言。
+  setLocale(detectLocale());
   const engine = new Protecter(getAgentDir());
   const compatible =
     /^0\.85\./.test(VERSION) && Number(VERSION.split(".")[2]) >= 1;
@@ -35,16 +39,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       if (!compatible) throw failure("UNSUPPORTED_PI");
       await engine.initialize();
       healthy = true;
-      const count = engine.ruleCount;
-      ctx.ui.setStatus("protecter", `SPI Protecter · ${count} rules`);
-      if (count === 0)
-        ctx.ui.notify(
-          "SPI Protecter: empty rules; edit local machine config and /reload / 规则为空，请编辑本地机器配置后重载。",
-          "warning",
-        );
+      const rules = engine.ruleCount;
+      ctx.ui.setStatus(
+        "protecter",
+        t("statusBarRules", { rules: count("rules", rules) }),
+      );
+      if (rules === 0) ctx.ui.notify(t("emptyRules"), "warning");
     } catch (error) {
       healthy = false;
-      ctx.ui.setStatus("protecter", "SPI Protecter · not ready / 未就绪");
+      ctx.ui.setStatus("protecter", t("statusBarNotReady"));
       ctx.ui.notify(
         record(sanitizeError(error, "CONFIG_IO").diagnostic),
         "error",
@@ -135,11 +138,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         engine.configPath,
       )
     ) {
-      return {
-        block: true,
-        reason:
-          "SPI Protecter blocked tool access to the protected configuration or audit log; edit it locally / 禁止工具访问受保护的配置或审计日志，请用户在本地编辑。",
-      };
+      return { block: true, reason: t("toolBlocked") };
     }
   });
 
@@ -148,10 +147,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // Until separately verified, cancel instead of silently sending plaintext summaries.
   // 在单独验证前取消这些请求，避免静默发送明文摘要。
   pi.on("session_before_compact", (_event, ctx) => {
-    ctx.ui.notify(
-      "SPI Protecter：暂不支持远程上下文压缩，请使用 /new 开始新会话。",
-      "warning",
-    );
+    ctx.ui.notify(t("compactUnsupported"), "warning");
     return { cancel: true };
   });
   pi.on("session_before_tree", (event) =>
@@ -159,7 +155,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   );
 
   pi.registerCommand("protecter", {
-    description: "View local protection records / 查看本地保护记录",
+    description: t("commandDescription"),
     handler: async (args, ctx) => {
       const parts = args.trim().split(/\s+/).filter(Boolean);
       const action = parts[0] ?? "logs";
@@ -167,35 +163,32 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         !["status", "reload", "logs"].includes(action) ||
         (action !== "logs" && parts.length > 1) ||
         parts.length > 2 ||
-        (parts[1] !== undefined && parts[1] !== "clear" && !/^(?:[1-9]\d?|100)$/.test(parts[1]))
+        (parts[1] !== undefined &&
+          parts[1] !== "clear" &&
+          !/^(?:[1-9]\d?|100)$/.test(parts[1]))
       ) {
-        ctx.ui.notify(
-          "Usage / 用法: /protecter [logs [1-100|clear]|status|reload]. No secrets in arguments / 不要在参数中输入秘密。",
-          "info",
-        );
+        ctx.ui.notify(t("usage"), "info");
         return;
       }
       if (action === "logs") {
         // TUI only: never send plaintext to RPC clients or model/session messages.
         // 仅限本地 TUI，不将明文发送给 RPC 客户端或模型及会话消息。
         if (ctx.mode !== "tui") {
-          ctx.ui.notify(
-            "Local TUI required / 请在本地 TUI 查看记录。",
-            "warning",
-          );
+          ctx.ui.notify(t("logsTuiOnly"), "warning");
           return;
         }
         if (parts[1] === "clear") {
           try {
-            if (!engine.ready) throw new Error();
-            if (!await ctx.ui.confirm(
-              "Clear current audit log? / 清空当前审计日志？",
-              "Irreversible. Only this machine's log; config and mappings stay. Later requests may add records. / 不可撤销，仅清空本机日志，保留配置和映射，后续请求可能新增记录。",
-            )) return;
+            if (!engine.ready) throw failure("NOT_READY");
+            if (!(await ctx.ui.confirm(t("clearTitle"), t("clearBody"))))
+              return;
             await ctx.waitForIdle();
             const bytes = await engine.clearAuditRecords();
             healthy = engine.ready;
-            ctx.ui.notify(`Audit cleared: ${bytes} bytes / 已清空日志：${bytes} 字节。`, "info");
+            ctx.ui.notify(
+              t("cleared", { bytes: count("bytes", bytes) }),
+              "info",
+            );
           } catch (error) {
             ctx.ui.notify(
               record(sanitizeError(error, "AUDIT_IO").diagnostic),
@@ -209,7 +202,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             Number(parts[1] ?? 20),
           );
           if (!records.length) {
-            ctx.ui.notify("No readable records / 暂无可读记录。", "info");
+            ctx.ui.notify(t("logsNone"), "info");
             return;
           }
           const safe = (value: unknown) =>
@@ -222,23 +215,20 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               `${i + 1}. ${safe(r.time)} | ${safe(r.provider).slice(0, 120)}`,
           );
           const selected = await ctx.ui.select(
-            `Protection records / 保护记录${truncated ? " (limited tail / 有限尾部)" : ""}`,
+            t("logsSelectTitle") + (truncated ? t("logsTruncated") : ""),
             choices,
           );
           const index = selected === undefined ? -1 : choices.indexOf(selected);
           if (index < 0) return;
           if (
-            !(await ctx.ui.confirm(
-              "Sensitive plaintext / 敏感明文",
-              "Reveal locally? Never share this view / 确认本地显示？请勿分享此界面。",
-            ))
+            !(await ctx.ui.confirm(t("logsRevealTitle"), t("logsRevealBody")))
           )
             return;
           const text = safe(records[index]);
           await ctx.ui.editor(
-            "Local preview; edits discarded / 本地预览，编辑不保存",
+            t("logsPreviewTitle"),
             text.length > 20000
-              ? text.slice(0, 20000) + "\n[Preview truncated / 预览截断]"
+              ? `${text.slice(0, 20000)}\n${t("logsPreviewTruncated")}`
               : text,
           );
         } catch (error) {
@@ -257,15 +247,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       // Status repeats the last sanitized block so notifications are recoverable.
       // 状态会重新展示最近一次安全诊断，避免通知消失后无法定位。
       const last = engine.lastDiagnosticText ?? lastBlock?.text;
-      ctx.ui.notify(
-        [
-          `SPI Protecter: ${engine.ready ? "ready / 就绪" : "not ready / 未就绪"}; ${engine.ruleCount} rules / 规则; ${engine.mappingCount} mappings / 映射. Memory snapshot; /reload to refresh / 内存快照，重载后更新。`,
-          last
-            ? `\nLast block / 最近拦截${lastBlock ? ` @ ${lastBlock.at}` : ""}:\n${last}`
-            : "\nNo recorded block in this session / 本会话暂无拦截记录。",
-        ].join(""),
-        engine.ready ? "info" : "error",
-      );
+      const summary = t("statusLine", {
+        state: t(engine.ready ? "statusReady" : "statusNotReady"),
+        rules: count("rules", engine.ruleCount),
+        mappings: count("mappings", engine.mappingCount),
+      });
+      const detail = last
+        ? `\n${t("statusLastBlock", { at: lastBlock?.at ?? "" })}\n${last}`
+        : `\n${t("statusNoBlock")}`;
+      ctx.ui.notify(summary + detail, engine.ready ? "info" : "error");
     },
   });
   pi.on("session_shutdown", () => engine.close());

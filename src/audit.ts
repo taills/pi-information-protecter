@@ -60,15 +60,18 @@ function auditFailure(error: unknown) {
 }
 
 async function acquireAuditLock(path: string): Promise<string> {
-  const lock = `${path}.lock`, deadline = Date.now() + 2000;
+  const lock = `${path}.lock`,
+    deadline = Date.now() + 2000;
   for (;;) {
-    try { fs.mkdirSync(lock, { mode: 0o700 }); return lock; }
-    catch (error) {
+    try {
+      fs.mkdirSync(lock, { mode: 0o700 });
+      return lock;
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST")
         throw sanitizeError(error, "AUDIT_IO");
       if (Date.now() >= deadline)
         throw failure("AUDIT_LOCKED", { timeoutMs: 2000 });
-      await new Promise(resolve => setTimeout(resolve, 25));
+      await new Promise((resolve) => setTimeout(resolve, 25));
     }
   }
 }
@@ -78,8 +81,9 @@ export async function clearAudit(path: string): Promise<number> {
   const lock = await acquireAuditLock(path);
   let fd: number | undefined;
   try {
-    try { fd = openPrivate(path, true, false); }
-    catch (error) {
+    try {
+      fd = openPrivate(path, true, false);
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return 0;
       throw error;
     }
@@ -87,10 +91,14 @@ export async function clearAudit(path: string): Promise<number> {
     fs.ftruncateSync(fd, 0);
     fs.fsyncSync(fd);
     return size;
-  } catch (error) { throw auditFailure(error); }
-  finally {
-    try { if (fd !== undefined) fs.closeSync(fd); }
-    finally { fs.rmdirSync(lock); }
+  } catch (error) {
+    throw auditFailure(error);
+  } finally {
+    try {
+      if (fd !== undefined) fs.closeSync(fd);
+    } finally {
+      fs.rmdirSync(lock);
+    }
   }
 }
 

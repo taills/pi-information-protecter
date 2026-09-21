@@ -18,6 +18,9 @@ export class Protecter {
   private closed = false;
   private snapshot?: Snapshot;
   private lastError?: Diagnostic;
+  // Mappings only grow until close(), so size is a safe cache key. / 映射仅增长至关闭，因此数量可作缓存键。
+  private restorePattern?: RegExp;
+  private restoreSize = -1;
   constructor(
     private readonly configDir: string,
     private readonly timeoutMs = 2000,
@@ -171,13 +174,20 @@ export class Protecter {
       };
       const timer = setTimeout(
         () =>
-          finish(undefined, failure("SCAN_TIMEOUT", { timeoutMs: this.timeoutMs })),
+          finish(
+            undefined,
+            failure("SCAN_TIMEOUT", { timeoutMs: this.timeoutMs }),
+          ),
         this.timeoutMs,
       );
       worker.once("message", (data) => {
         if (data?.failed)
           finish(undefined, workerError(data.diagnostic, "SCAN_INTERNAL"));
-        else if (data && Array.isArray(data.additions) && Array.isArray(data.hits))
+        else if (
+          data &&
+          Array.isArray(data.additions) &&
+          Array.isArray(data.hits)
+        )
           finish(data);
         else finish();
       });
@@ -195,23 +205,29 @@ export class Protecter {
   restoreText(text: string): string {
     // One pass, never recursively expand text introduced by a replacement.
     // 仅替换一遍，不递归展开替换后引入的文本。
-    const escape = (value: string) =>
-      value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const fixed = [...this.tokens.keys()].filter(
-      (token) => !/^__PIP_[a-f0-9]{48}__$/.test(token),
+    if (!this.tokens.size) return text;
+    if (this.restoreSize !== this.tokens.size) {
+      const escape = (value: string) =>
+        value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // Longest first so a shorter replacement cannot split a longer one.
+      // 长值优先，避免短替换值切分较长的替换值。
+      this.restorePattern = new RegExp(
+        [...this.tokens.keys()]
+          .sort((a, b) => b.length - a.length)
+          .map(escape)
+          .join("|"),
+        "g",
+      );
+      this.restoreSize = this.tokens.size;
+    }
+    return text.replace(
+      this.restorePattern!,
+      (token) => this.tokens.get(token) ?? token,
     );
-    const pattern = new RegExp(
-      [
-        "__PIP_[a-f0-9]{48}__",
-        ...fixed.sort((a, b) => b.length - a.length).map(escape),
-      ].join("|"),
-      "g",
-    );
-    return text.replace(pattern, (token) => this.tokens.get(token) ?? token);
   }
 
   restore<T>(value: T, depth = 0): T {
-    if (depth > 80) throw new Error("protecter: 响应层级过深。");
+    if (depth > 80) throw failure("RESTORE_COMPLEXITY", { node: depth });
     if (typeof value === "string") return this.restoreText(value) as T;
     if (Array.isArray(value))
       return value.map((item) => this.restore(item, depth + 1)) as T;
@@ -220,7 +236,7 @@ export class Protecter {
       for (const [key, item] of Object.entries(value)) {
         const nextKey = this.restoreText(key);
         if (Object.hasOwn(result, nextKey))
-          throw new Error("protecter: 响应键冲突。");
+          throw failure("RESTORE_KEY_COLLISION");
         result[nextKey] = this.restore(item, depth + 1);
       }
       return result as T;

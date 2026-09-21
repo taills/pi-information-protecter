@@ -19,8 +19,10 @@ Prevent configured personal information from accidentally entering Pi LLM reques
 
 ## Implementation / 实现策略
 
-- Scan outgoing payload text with random 192-bit placeholders. Runtime mappings stay in memory, but version 0.3.0 adds plaintext original/token audit pairs in private JSONL. Audit files are sensitive credential stores, not encrypted archives; never upload them. Logs persist after exit and are not loaded to restore tokens.
-  出站文本使用随机占位符，运行映射保存在内存，但 0.3.0 新增私有 JSONL 原文与占位符审计。日志属于敏感凭证存储，不是加密归档，禁止上传；退出后仍保留，不用于恢复占位符。
+- Scan outgoing payload text and replace matches with random shape-preserving values. Runtime mappings stay in memory, but version 0.3.0 adds plaintext original/replacement audit pairs in private JSONL. Audit files are sensitive credential stores, not encrypted archives; never upload them. Logs persist after exit and are not loaded to restore mappings.
+  出站文本使用随机同形值替换，运行映射保存在内存，但 0.3.0 新增私有 JSONL 原文与替换值审计。日志属于敏感凭证存储，不是加密归档，禁止上传；退出后仍保留，不用于恢复映射。
+- Shape-preserving replacements (0.6.0) keep JSON types, length, character class and punctuation structure, so they leak more metadata than opaque tokens and look like plausible real data. Unsupported scripts and symbols are preserved unchanged, so part of a matched value may stay visible. Short matches may be restored when a model independently emits the same string; prefer long, distinctive targets. Numeric values that cannot round-trip and matches with no unique replacement fail closed.
+  同形替换（0.6.0）保留 JSON 类型、长度、字符类别和标点结构，因此比不透明占位符泄露更多元信息，且看似真实数据。不支持的文字体系和符号原样保留，命中值可能部分可见。模型自行输出相同短字符串时可能被还原，应优先使用较长且有辨识度的目标；无法精确往返的数值以及无唯一替换值的匹配均拒绝放行。
 - Audit writes use 0600 files, safe-open checks, a cooperative lock and fsync before returning a redacted payload. Logging errors fail closed. Success means local replacement, not provider delivery. File size and preview limits bound resource usage; users manage retention locally. Hard crashes may leave stale locks or partial records. Same-UID writers and terminal capture remain outside the threat model.
   日志使用 0600、安全打开检查、协作锁，并在返回脱敏请求前同步落盘；日志失败则拒绝请求。成功表示本地替换而非网关已接收。文件及预览大小受限，用户本地管理保留策略；硬崩溃可能残留锁或不完整记录，同用户权限攻击和终端录屏仍不在防护范围。
 - `/protecter` previews are TUI-only and require confirmation before showing original values; nothing is injected into model context or session entries. Trusted extensions may still observe UI hooks. Configuration caching remains memory-only during requests, but matched requests now perform audit-file writes.

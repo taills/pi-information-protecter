@@ -28,7 +28,9 @@ test("fixed literals plus random fallback and audit / 固定字面替换、随�
   ]);
   const original = "Apple Inc. test-key-123 random-secret";
   const masked = (await engine.redact(original, "demo")) as string;
-  assert.match(masked, /^Alphabet Inc\. MyPrivateKey __PIP_[a-f0-9]{48}__$/);
+  // Fixed aliases stay exact; the third rule gets a shape-preserving value.
+  // 固定别名保持原样，第三条规则使用同形随机值。
+  assert.match(masked, /^Alphabet Inc\. MyPrivateKey [a-z]{6}-[a-z]{6}$/);
   assert.equal(engine.restoreText(masked), original);
   assert.equal(await engine.redact(masked), masked);
   assert.equal(engine.restoreText("AlphabetXInc."), "AlphabetXInc.");
