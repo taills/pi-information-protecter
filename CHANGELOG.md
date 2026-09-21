@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## Unreleased / 未发布
+## 0.6.4 — Pi 0.86 support / 支持 Pi 0.86
 
 ### Added / 新增
 
