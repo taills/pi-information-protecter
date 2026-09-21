@@ -178,7 +178,8 @@ test("addresses stay parseable after replacement / 地址替换后仍可解析",
     },
     {
       type: "regex",
-      pattern: "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\\w:.])",
+      pattern:
+        "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\\w:.])",
     },
     {
       type: "regex",
