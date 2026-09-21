@@ -107,6 +107,19 @@ Letters and digits are replaced inside their own writing system: ASCII, Latin-1,
 
 **The model reasons about the replacement, so answers derived from a protected value are wrong.** Asking for the third digit of a protected ID returns the third digit of the replacement, and only the value itself is restored in the reply, never the conclusion drawn from it. The answer therefore looks confident and consistent but does not match the restored value. An opaque token made this obvious, because the model could only report that it could not read the value. Do not ask the model about digits, checksums, ordering, arithmetic or comparisons involving protected values; compute those locally.
 
+Worked example, asking for the third digit of a protected phone number:
+
+| Step | Value |
+| --- | --- |
+| What you typed | `13800138000` — third digit is `8` |
+| What the provider received | `27431905882` — third digit is `4` |
+| What the model answered | "the third digit is `4`" |
+| What you see after restoration | `13800138000` … "the third digit is `4`" |
+
+The number is restored, the reasoning is not, so the reply quietly contradicts itself. Nothing flags this: a derived answer is ordinary text, indistinguishable from any other sentence. The reply is also consistent across retries, because the same value keeps the same replacement, so re-asking does not reveal the error.
+
+If a field must be reasoned about correctly, either leave it unprotected, or give it a fixed `replacement` and accept that the alias is semantically recognisable. There is no option that both hides a value and lets the model compute over it.
+
 Replacements are checked so restoration stays exact: a candidate is rejected if it equals the original, is already mapped, or already appears anywhere in the same request. When no unique candidate can be produced, typically for very short matches, the request is blocked with `SCAN_UNIQUE_FAILED`. Because a shaped value is indistinguishable from ordinary content, a model that independently emits the same short string will have it restored to the original, so prefer rules that match longer, distinctive values.
 
 ### Message language
@@ -308,6 +321,19 @@ pi -e ./src/index.ts
 **这是有意为之的权衡。** 不透明占位符仅暴露“发生了脱敏”；同形值还会暴露长度、字符类别和标点结构，并且在模型看来像真实数据。不支持的文字体系会原样保留，因此匹配这类文本的规则可能残留部分可见内容。
 
 **模型推理的是替换值，因此从受保护值推导出的答案是错的。** 询问受保护身份证号的第 3 位，得到的是替换值的第 3 位；回复中只有值本身会被还原，由它推导出的结论不会。因此答案看似笃定且自洽，却与还原后的值对不上。不透明占位符不会有这个问题，因为模型只能表示自己读不到该值。请勿让模型回答涉及受保护值的位数、校验位、排序、算术或比较，这类计算应在本地完成。
+
+实例：询问受保护手机号的第 3 位。
+
+| 环节 | 值 |
+| --- | --- |
+| 你输入的内容 | `13800138000`——第 3 位是 `8` |
+| 提供商实际收到的 | `27431905882`——第 3 位是 `4` |
+| 模型的回答 | “第 3 位是 `4`” |
+| 还原后你看到的 | `13800138000` … “第 3 位是 `4`” |
+
+号码被还原了，推理没有，因此回复会静默地自相矛盾。没有任何机制能发现它：推导出的答案就是普通文本，与其他句子无法区分。重试也不会暴露错误，因为同一值始终对应同一替换值，结果前后一致。
+
+如果某个字段必须被正确推理，要么不保护它，要么为它设置固定 `replacement` 并接受别名在语义上可识别。不存在既隐藏值、又能让模型对它运算的方案。
 
 为保证还原精确，候选值会被校验：与原文相同、已被占用、或已出现在同一请求中的候选值会被拒绝。无法生成唯一值时（通常是极短匹配），以 `SCAN_UNIQUE_FAILED` 拦截请求。由于同形值与普通内容难以区分，若模型自行输出了相同的短字符串，它会被还原为原文，因此应优先匹配更长、更有辨识度的值。
 
