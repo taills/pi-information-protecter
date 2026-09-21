@@ -1,5 +1,20 @@
 # Changelog / 更新日志
 
+## Unreleased / 未发布
+
+### Fixed / 修复
+
+- Retry numeric replacements instead of blocking the request. Validity was checked only after a candidate had been committed, so an unlucky draw aborted the request; roughly one request in ten failed with `SCAN_NUMBER_UNSAFE` when a rule matched a decimal, and about two in three when it matched an exponent.
+  数值替换改为重试而不拦截请求。之前校验发生在候选值落定之后，随机抽到不合法的值就会终止请求：规则匹配小数时约十分之一的请求以 `SCAN_NUMBER_UNSAFE` 失败，匹配指数时约三分之二。
+- Judge each numeric candidate inside the whole number rather than on its own, and keep exponent digits, a multi-digit integer part's leading digit and a fractional part's trailing digit structurally valid.
+  在整个数值上下文中判断候选值，并保持指数位、多位整数部分的首位和小数部分的末位在结构上有效。
+- Restore redacted numbers as numbers. Since 0.6.0 a numeric field keeps its JSON type, but restoration only walked strings, so a numeric tool argument was executed with the replacement value instead of the original.
+  脱敏后的数字以数字还原。0.6.0 起数值字段保持 JSON 类型，但还原只遍历字符串，导致数值类工具参数会以替换值而非原值执行。
+- Add a regression that repeatedly redacts decimals and exponents and asserts every field stays a finite JSON number.
+  新增回归：反复脱敏小数与指数，断言每个字段仍为有限的 JSON 数字。
+- Add a regression asserting that one value maps to one replacement across strings, object keys, numbers, nested structures and JSON-encoded tool arguments in the same request.
+  新增回归：同一请求中的字符串、对象键、数字、嵌套结构和 JSON 编码的工具参数，同一值始终替换为同一个值。
+
 ## 0.6.1 — Valid address replacements / 合法的地址替换
 
 ### Fixed / 修复

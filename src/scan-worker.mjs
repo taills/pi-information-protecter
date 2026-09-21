@@ -1,7 +1,12 @@
 // A separate worker bounds user-supplied JavaScript regex execution (including ReDoS).
 // 独立 worker 限制用户正则的执行时间，包括正则拒绝服务风险。
 import { parentPort, workerData } from "node:worker_threads";
-import { numericRoundTrips, reshapeInteger, reshapeValue } from "./shape.mjs";
+import {
+  numericRoundTrips,
+  reshapeInteger,
+  reshapeNumericPart,
+  reshapeValue,
+} from "./shape.mjs";
 
 // Track the active rule/node so blocks can be located without exposing content.
 // 记录当前规则和节点，使拦截可定位而不暴露内容。
@@ -58,24 +63,27 @@ try {
    * Shape-preserving values keep JSON types valid but must stay unambiguous.
    * 同形替换保持 JSON 类型有效，但必须保证映射无歧义。
    */
-  function generate(original, numeric) {
+  function generate(original, numeric, accepts) {
     for (let attempt = 0; attempt < 64; attempt++) {
-      const candidate =
-        numeric && /^\d+$/.test(original)
-          ? reshapeInteger(original)
-          : reshapeValue(original);
+      let candidate;
+      if (!numeric) candidate = reshapeValue(original);
+      else if (/^\d+$/.test(original)) candidate = reshapeInteger(original);
+      else candidate = reshapeNumericPart(original);
       if (!candidate || candidate === original) continue;
       // Reject values already meaningful elsewhere, so restoration stays exact.
       // 拒绝已在别处出现的值，确保还原精确。
       if (tokenToOriginal.has(candidate)) continue;
       if (originalToToken.has(candidate)) continue;
       if (payloadText.includes(candidate)) continue;
+      // Draw again instead of blocking when the value would stop being valid.
+      // 候选值会破坏有效性时重新抽取，而不是拦截请求。
+      if (accepts && !accepts(candidate)) continue;
       return candidate;
     }
     return undefined;
   }
 
-  function tokenFor(original, replacement, numeric = false) {
+  function tokenFor(original, replacement, numeric = false, accepts) {
     let token = originalToToken.get(original);
     if (token) {
       if (replacement !== undefined && token !== replacement)
@@ -96,7 +104,7 @@ try {
       return replacement;
     }
     if (tokenToOriginal.size >= 50000) fail("SCAN_MAPPING_LIMIT");
-    token = generate(original, numeric);
+    token = generate(original, numeric, accepts);
     if (!token) fail("SCAN_UNIQUE_FAILED");
     originalToToken.set(original, token);
     tokenToOriginal.set(token, original);
@@ -160,7 +168,20 @@ try {
       cursor = 0;
     for (const [start, end, replacement, rule] of merged) {
       activeRule = rule;
-      const token = tokenFor(text.slice(start, end), replacement, numeric);
+      // Judge a numeric candidate inside the whole number, not on its own.
+      // 在整个数值上下文中判断候选值，而不是孤立判断。
+      const accepts = numeric
+        ? (candidate) =>
+            numericRoundTrips(
+              text.slice(0, start) + candidate + text.slice(end),
+            )
+        : undefined;
+      const token = tokenFor(
+        text.slice(start, end),
+        replacement,
+        numeric,
+        accepts,
+      );
       hitTokens.add(token);
       result += text.slice(cursor, start) + token;
       cursor = end;

@@ -97,7 +97,7 @@ Since 0.6.0 a matched value is replaced by a random value of the **same shape** 
 | `192.168.1.10` | `101.203.3.77` | valid IPv4, octets ≤ 255 |
 | `fe80::1ff:fe23:4567` | `af44::6ea:bf19:2700` | valid IPv6, `::` and group widths |
 
-This fixes provider errors such as `'9007199254740991' is not of type 'number'`, which happened when a numeric field was replaced by a token string. Numeric JSON values stay numbers, keep their digit count and remain safe integers. If a partial match cannot round-trip as a number, the request is blocked with `SCAN_NUMBER_UNSAFE` instead of sending an invalid type.
+This fixes provider errors such as `'9007199254740991' is not of type 'number'`, which happened when a numeric field was replaced by a token string. Numeric JSON values stay numbers, keep their digit count and remain safe integers. Each candidate is judged inside the whole number and redrawn when it would not round-trip, so matching a decimal or an exponent no longer blocks the request; `SCAN_NUMBER_UNSAFE` remains only as a last resort, mainly when a value already mapped in text context reappears as a number.
 
 Addresses are format-aware: an IPv4 match keeps every octet within 0-255, and an IPv6 match keeps hex digits hexadecimal along with `::` compression, group widths and any embedded IPv4 tail, so `net.isIPv4`/`net.isIPv6` and provider validators still accept them. A plain per-character replacement would otherwise yield octets above 255 or non-hex characters. Addresses embedded inside a longer match, such as a URL matched as a whole, still use per-character replacement.
 
@@ -297,7 +297,7 @@ pi -e ./src/index.ts
 | `192.168.1.10` | `101.203.3.77` | 合法 IPv4，每段不超过 255 |
 | `fe80::1ff:fe23:4567` | `af44::6ea:bf19:2700` | 合法 IPv6，保留 `::` 与分组宽度 |
 
-这修复了类似 `'9007199254740991' is not of type 'number'` 的提供商错误：过去数值字段会被替换成字符串占位符。现在数值仍为数字，位数不变并保持安全整数；若部分匹配无法作为数字精确往返，则以 `SCAN_NUMBER_UNSAFE` 拦截，而不发送错误类型。
+这修复了类似 `'9007199254740991' is not of type 'number'` 的提供商错误：过去数值字段会被替换成字符串占位符。现在数值仍为数字，位数不变并保持安全整数；候选值在整个数值上下文中校验，不合法则重新抽取，因此匹配小数或指数不再拦截请求；`SCAN_NUMBER_UNSAFE` 仅作为最后手段保留，主要出现在文本上下文已建立映射的值再次以数值形式出现时。
 
 地址采用格式感知替换：IPv4 匹配保证每段在 0-255 内，IPv6 匹配保证十六进制字符仍为十六进制，并保留 `::` 压缩写法、分组宽度及末尾嵌入的 IPv4，因此 `net.isIPv4`/`net.isIPv6` 和提供商校验仍然通过。若仅逐字符替换，会产生超过 255 的段或非十六进制字符。嵌在更长匹配（如整条 URL）中的地址仍按字符替换。
 

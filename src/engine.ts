@@ -229,6 +229,16 @@ export class Protecter {
   restore<T>(value: T, depth = 0): T {
     if (depth > 80) throw failure("RESTORE_COMPLEXITY", { node: depth });
     if (typeof value === "string") return this.restoreText(value) as T;
+    // Numbers now keep their JSON type, so they must be restored as numbers too.
+    // 数值现在保持 JSON 类型，因此也必须以数字形式还原。
+    if (typeof value === "number") {
+      const original = this.tokens.get(String(value));
+      if (original === undefined) return value;
+      const restored = Number(original);
+      if (!Number.isFinite(restored) || String(restored) !== original)
+        return value;
+      return restored as T;
+    }
     if (Array.isArray(value))
       return value.map((item) => this.restore(item, depth + 1)) as T;
     if (value && typeof value === "object") {

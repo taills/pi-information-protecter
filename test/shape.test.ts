@@ -149,6 +149,37 @@ test("replacements never collide with payload content / 替换值不与请求内
   assert.equal(engine.restoreText(masked.a), "secret");
 });
 
+test("numeric candidates are retried, not blocked / 数值候选重试而不拦截", async (t) => {
+  // A decimal or exponent match used to block roughly one request in ten,
+  // because validity was checked only after a candidate was committed.
+  // 跨小数或指数的匹配曾约有十分之一的请求被拦截，因为校验发生在候选值落定之后。
+  // Values long enough to have distinct replacements; very short numbers are
+  // covered by the fail-closed uniqueness test below.
+  // 选用足够长的数值；极短数值由下方的唯一性拒绝用例覆盖。
+  const numbers = [
+    123.45, 9876.5432, 1234.5678, 0.00012345, 1.5e-7, 1.25e21, 2147483647,
+    9007199254740991,
+  ];
+  for (let round = 0; round < 25; round++) {
+    const { engine } = await fixture(t, [
+      { type: "regex", pattern: "(?<![\\d.])[\\d.]+(?:[eE][+-]?\\d+)?(?![\\d.])" },
+    ]);
+    // Letter-only keys, so the broad pattern cannot match the key names.
+    // 使用纯字母键名，避免宽泛模式匹配到键。
+    const names = "abcdefgh".split("");
+    const payload = Object.fromEntries(
+      numbers.map((value, index) => [names[index], value]),
+    );
+    const masked = (await engine.redact(payload)) as Record<string, number>;
+    for (const key of Object.keys(payload)) {
+      assert.equal(typeof masked[key], "number", key);
+      assert.ok(Number.isFinite(masked[key]), key);
+    }
+    // The payload must survive a JSON round trip as numbers. / 请求体经 JSON 往返后仍为数字。
+    assert.deepEqual(JSON.parse(JSON.stringify(masked)), masked);
+  }
+});
+
 test("exhausted and unsafe shapes fail closed / 无可用形状或数值不安全时拒绝放行", async (t) => {
   // Every single-digit candidate already appears, so uniqueness is impossible.
   // 所有单位数候选都已出现，无法生成唯一值。
@@ -158,13 +189,73 @@ test("exhausted and unsafe shapes fail closed / 无可用形状或数值不安�
     "SCAN_UNIQUE_FAILED",
   );
 
-  // Replacing an exponent letter would stop the value being a valid number.
-  // 替换指数字母会使数值不再有效。
-  const exponent = await fixture(t, [{ type: "regex", pattern: "e" }]);
-  assert.equal(
-    await codeOf(exponent.engine.redact({ big: 1e21 })),
-    "SCAN_NUMBER_UNSAFE",
+  // A mapping first made for text is reused for the number, and text shapes
+  // carry letters, so the number can no longer round-trip and must fail closed.
+  // 先在文本上下文建立的映射会被数值复用，而文本形状含字母，数值因此无法往返，必须拒绝放行。
+  const shared = await fixture(t, ["1.5e-7"]);
+  const code = await codeOf(
+    shared.engine.redact({ text: "value 1.5e-7 here", number: 1.5e-7 }),
   );
+  assert.ok(
+    ["SCAN_NUMBER_UNSAFE", "SCAN_UNIQUE_FAILED"].includes(code),
+    `unexpected code: ${code}`,
+  );
+});
+
+test("one value maps to one replacement everywhere / 同一值在各处替换为同一值", async (t) => {
+  const { engine } = await fixture(t, ["123456", "张三"]);
+  const payload = {
+    system: "code 123456 and again 123456",
+    messages: [
+      { role: "user", content: "123456 张三" },
+      { role: "assistant", content: "repeat 123456" },
+      { role: "tool", content: JSON.stringify({ pin: "123456", who: "张三" }) },
+    ],
+    numeric: 123456,
+    nested: { deep: ["123456", "张三"] },
+    "123456": "key position",
+    tool: { arguments: JSON.stringify({ code: "123456" }) },
+  };
+  const masked = (await engine.redact(payload)) as typeof payload;
+  const text = JSON.stringify(masked);
+  assert.ok(!text.includes("123456"));
+  assert.ok(!text.includes("张三"));
+  // Every occurrence, including the key and the number, uses one value.
+  // 包括键和数字在内的每一处都使用同一个值。
+  const digits = [...text.matchAll(/\d{6}/g)].map((match) => match[0]);
+  assert.equal(new Set(digits).size, 1, `multiple values: ${digits.join()}`);
+  assert.equal(digits.length, 9);
+  const names = [...text.matchAll(/[\u4e00-\u9fa5]{2}/g)].map((m) => m[0]);
+  assert.equal(new Set(names).size, 1, `multiple values: ${names.join()}`);
+  assert.equal(names.length, 3);
+  // The number keeps its JSON type and shares the string replacement.
+  // 数字保持 JSON 类型，并与字符串共用同一替换值。
+  assert.equal(typeof masked.numeric, "number");
+  assert.equal(String(masked.numeric), digits[0]);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(engine.restore(masked))),
+    JSON.parse(JSON.stringify(payload)),
+  );
+});
+
+test("redacted numbers are restored as numbers / 脱敏后的数字以数字还原", async (t) => {
+  // Tool arguments are restored before execution, so a numeric argument must
+  // return to its original value and type, not keep the replacement.
+  // 工具参数在执行前还原，数值参数必须恢复原值和类型，不能保留替换值。
+  const { engine } = await fixture(t, [
+    { type: "regex", pattern: "(?<!\\d)\\d{6,}(?!\\d)" },
+  ]);
+  const payload = { id: 13800138000, limit: 9007199254740991, text: "483920" };
+  const masked = (await engine.redact(payload)) as typeof payload;
+  assert.equal(typeof masked.id, "number");
+  assert.notEqual(masked.id, payload.id);
+  const restored = engine.restore(masked) as typeof payload;
+  assert.equal(typeof restored.id, "number");
+  assert.equal(restored.id, 13800138000);
+  assert.equal(restored.limit, 9007199254740991);
+  assert.equal(restored.text, "483920");
+  // An unknown number is left exactly as it is. / 未知数字原样保留。
+  assert.equal(engine.restore({ other: 4242424242 }).other, 4242424242);
 });
 
 test("addresses stay parseable after replacement / 地址替换后仍可解析", async (t) => {

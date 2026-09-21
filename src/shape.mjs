@@ -161,6 +161,42 @@ export function reshapeInteger(digits) {
   return String(low + randomBelow(bound - low + 1n));
 }
 
+/**
+ * Reshape a match inside a number that is not a plain digit run.
+ * Exponent digits are structural and never change, a multi-digit integer part
+ * never gains a leading zero, and a fractional part never gains a trailing
+ * zero; each of those would stop the value round-tripping.
+ * 处理数值中非纯数字串的匹配：指数属于结构不替换，多位整数部分不产生前导零，
+ * 小数部分不产生末尾零，否则数值无法精确往返。
+ */
+export function reshapeNumericPart(text) {
+  const split = /^([0-9.+-]*?)([eE][+-]?\d+)?$/.exec(text);
+  if (!split || !/\d/.test(split[1])) return undefined;
+  const mantissa = split[1];
+  const exponent = split[2] ?? "";
+  const dot = mantissa.indexOf(".");
+  const lastDigit = mantissa.search(/\d(?!.*\d)/);
+  const digitsBefore = dot === -1 ? mantissa.length : dot;
+  let out = "";
+  for (const [index, char] of [...mantissa].entries()) {
+    if (char < "0" || char > "9") {
+      out += char;
+      continue;
+    }
+    const integerPart = dot === -1 || index < dot;
+    const leading = integerPart && !/\d/.test(out);
+    const trailing = !integerPart && index === lastDigit;
+    // A lone zero is the value itself, not a padding digit. / 孤立的零是数值本身，不是填充位。
+    if (char === "0" && (leading || trailing)) {
+      out += "0";
+      continue;
+    }
+    const avoidZero = (leading && digitsBefore > 1) || trailing;
+    out += String(avoidZero ? 1n + randomBelow(9n) : randomBelow(10n));
+  }
+  return out + exponent;
+}
+
 /** Numeric JSON values must round-trip exactly to stay schema-valid. / 数值必须精确往返才能保持结构有效。 */
 export function numericRoundTrips(text) {
   const value = Number(text);
