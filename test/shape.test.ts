@@ -162,7 +162,10 @@ test("numeric candidates are retried, not blocked / 数值候选重试而不拦�
   ];
   for (let round = 0; round < 25; round++) {
     const { engine } = await fixture(t, [
-      { type: "regex", pattern: "(?<![\\d.])[\\d.]+(?:[eE][+-]?\\d+)?(?![\\d.])" },
+      {
+        type: "regex",
+        pattern: "(?<![\\d.])[\\d.]+(?:[eE][+-]?\\d+)?(?![\\d.])",
+      },
     ]);
     // Letter-only keys, so the broad pattern cannot match the key names.
     // 使用纯字母键名，避免宽泛模式匹配到键。
