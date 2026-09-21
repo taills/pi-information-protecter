@@ -5,7 +5,7 @@
     { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
     { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
     { "type": "literal", "value": "replace-with-your-real-password" },
-    { "type": "regex", "pattern": "https?://[^\\s\\\"<>]+", "flags": "i" },
+    { "type": "regex", "pattern": "https?://[^\\s\\\"<>/:]+", "flags": "i" },
     { "type": "literal", "value": "vpn.internal.example", "replacement": "gateway.internal.example" },
     { "type": "regex", "pattern": "(?<![\\w.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\\.)+(?:corp|internal|intra|lan|local)(?![\\w.-])", "flags": "i" },
     { "type": "regex", "pattern": "(?<![\\w.-])[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\\.[A-Za-z]{2,}(?![\\w.-])" },
