@@ -67,6 +67,7 @@ More examples are in [`protecter.example.json`](protecter.example.json), coverin
 - Overlapping matches are merged to avoid exposing a longer secret's suffix. Equal values reuse a token within the extension instance.
 - Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
 - `/protecter` opens the local audit viewer; `/protecter logs 50` shows up to 50 recent records. `/protecter status` reports memory counts without reading configuration. `/protecter reload` invokes Pi's full reload after idle. Do not enter secrets as command arguments.
+- Avoid rules that can match a very short string. A short match has few shape-preserving candidates, and on a large payload such as a compaction request every candidate already occurs elsewhere, so the request fails with `SCAN_UNIQUE_FAILED`. Require a realistic minimum length, for example `[A-Za-z0-9._~+/-]{16,}` rather than `+`.
 - Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
 
 ### Fixed replacement values
@@ -324,6 +325,7 @@ pi update npm:pi-information-protecter
 - 合并重叠匹配，避免暴露长敏感值的后缀；同一实例内相同原文复用占位符。
 - 已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
 - `/protecter` 打开本地审计查看器，`/protecter logs 50` 查看最近最多 50 条；`/protecter status` 只报告内存数量，不读取配置。`/protecter reload` 等待空闲后完整重载。不要在命令参数中填写秘密。
+- 避免可能匹配极短字符串的规则。短匹配的同形候选值很少，而在压缩请求这类大载荷下每个候选值都已出现在别处，请求会以 `SCAN_UNIQUE_FAILED` 失败。请设定合理的最小长度，例如用 `[A-Za-z0-9._~+/-]{16,}` 而非 `+`。
 - 限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
 
 ### 固定替换值

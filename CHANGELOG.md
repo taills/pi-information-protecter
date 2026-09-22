@@ -1,5 +1,19 @@
 # Changelog / 更新日志
 
+## 0.8.1 — Example Bearer rule no longer matches short strings / 示例 Bearer 规则不再匹配短字符串
+
+### Fixed / 修复
+
+- Require at least 16 characters in the shipped Bearer rule. `(?<=Bearer )[A-Za-z0-9._~+/-]+=*` matched a single character and ordinary words such as `token`. A short match has few shape-preserving candidates, and on a compaction payload, which holds the whole conversation, every candidate already occurs, so `/compact` failed with `SCAN_UNIQUE_FAILED`.
+  示例 Bearer 规则要求至少 16 个字符。原规则会匹配单个字符和 `token` 这类普通单词；短匹配的同形候选值很少，而压缩载荷包含整个会话，每个候选值都已出现，导致 `/compact` 以 `SCAN_UNIQUE_FAILED` 失败。
+- Add a regression asserting that no shipped rule matches a string of four characters or fewer.
+  新增回归，断言示例中任何规则都不会匹配四个及以下字符的字符串。
+
+### Documentation / 文档
+
+- Warn against rules that can match a very short string, and show a minimum-length pattern instead.
+  提示避免可能匹配极短字符串的规则，并给出带最小长度的写法。
+
 ## 0.8.0 — Protected summarization / 受保护的摘要生成
 
 ### Added / 新增

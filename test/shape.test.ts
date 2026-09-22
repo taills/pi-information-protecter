@@ -311,6 +311,40 @@ test("addresses stay parseable after replacement / 地址替换后仍可解析",
   assert.deepEqual(JSON.parse(JSON.stringify(engine.restore(masked))), input);
 });
 
+test("no shipped rule matches a very short string / 示例规则不匹配极短字符串", () => {
+  // A short match has too few shape-preserving candidates, and on a large
+  // payload such as a compaction request every candidate already occurs, so
+  // the whole request fails with SCAN_UNIQUE_FAILED.
+  // 极短匹配的同形候选值太少；在压缩请求这类大载荷下，每个候选值都已出现，
+  // 整个请求会以 SCAN_UNIQUE_FAILED 失败。
+  const example = JSON.parse(
+    fs.readFileSync("protecter.example.json", "utf8"),
+  ) as { sensitiveWords: Rule[] };
+  const probe = [
+    "Bearer x",
+    "the Bearer token",
+    "Bearer id",
+    "call 1 or 7",
+    "a.co",
+    "::1",
+    "1.2.3.4",
+    "vpn.corp",
+    "order 12 and 345",
+  ].join("\n");
+  for (const [index, rule] of example.sensitiveWords.entries()) {
+    if (typeof rule === "string" || rule.type !== "regex") continue;
+    const matcher = new RegExp(rule.pattern, `${rule.flags ?? ""}g`);
+    const short = [...probe.matchAll(matcher)]
+      .map((match) => match[0])
+      .filter((value) => value.length <= 4);
+    assert.deepEqual(
+      short,
+      [],
+      `rule ${index + 1} matches short strings: ${short.map((v) => JSON.stringify(v)).join(", ")}`,
+    );
+  }
+});
+
 test("shipped example rules load and protect their targets / 示例配置可加载并生效", async (t) => {
   const example = JSON.parse(
     fs.readFileSync("protecter.example.json", "utf8"),
