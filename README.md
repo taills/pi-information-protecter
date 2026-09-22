@@ -163,6 +163,30 @@ Set `compaction` in the local configuration:
 
 The prompt offers allow once, allow for this session, deny once and deny for this session. A session choice lasts until reload or exit; `compaction` in the configuration is the permanent setting. Dismissing the dialog denies that compaction.
 
+### A dedicated summarization model
+
+Summarizing sends the whole conversation, redacted, to a second destination. Point it at a local or otherwise trusted endpoint:
+
+```json
+{
+  "version": 1,
+  "compaction": {
+    "mode": "protected",
+    "provider": "A6000-vLLM",
+    "model": "Qwen38-27B-FP8",
+    "contextWindow": 262144,
+    "reserveTokens": 16384
+  },
+  "sensitiveWords": []
+}
+```
+
+Both `contextWindow` and `reserveTokens` are inherited and only needed as overrides: the window comes from Pi's model catalogue, and the reserve from Pi's own `compaction.reserveTokens` setting. Set the window for a private endpoint Pi does not know, and the reserve only when the summarization model needs a different margin. A minimal configuration is therefore just `mode`, `provider` and `model`. A configured model that cannot be resolved is an error, reported at startup rather than when the context fills up, and compaction never falls back to the main model, which would send the conversation somewhere you did not choose.
+
+**The threshold follows the summarization model, not the main one.** Pi compacts when the main model's window is nearly full; with a 1M main model that is around 983k tokens, which a 256k summarizer cannot read. The extension therefore compacts earlier, at the summarization model's window minus `reserveTokens`. `/protecter status` shows the target and the effective threshold.
+
+The conversation is redacted before it reaches this model as well, so a trusted endpoint improves reliability, cost and privacy, but the summary still describes replacements rather than the original values.
+
 Two costs are unavoidable: the extra summarization request consumes tokens, and the model reasons about replacements, so the summary can describe protected values inaccurately.
 
 Summarized `/tree` navigation takes the same internal Pi path and is protected the same way, using the same setting and prompt. Navigation without a summary sends nothing and is never gated.
@@ -420,6 +444,30 @@ Pi 在自己的压缩代码中构造摘要请求并直接发给提供商。该�
 ```
 
 弹窗提供四个选项：允许一次、本会话内全部允许、拒绝一次、本会话内全部拒绝。会话级选择在重载或退出前有效；配置中的 `compaction` 才是永久设置。关闭对话框视为拒绝本次压缩。
+
+### 专用摘要模型
+
+生成摘要会把脱敏后的整段对话发往第二个目的地。请指向本地或其他可信端点：
+
+```json
+{
+  "version": 1,
+  "compaction": {
+    "mode": "protected",
+    "provider": "A6000-vLLM",
+    "model": "Qwen38-27B-FP8",
+    "contextWindow": 262144,
+    "reserveTokens": 16384
+  },
+  "sensitiveWords": []
+}
+```
+
+`contextWindow` 与 `reserveTokens` 都会继承，仅在需要覆盖时填写：窗口取自 Pi 的模型目录，预留值取自 Pi 自身的 `compaction.reserveTokens` 设置。Pi 未收录的私有端点需填写窗口；只有当摘要模型需要不同余量时才填预留值。因此最小配置只需 `mode`、`provider`、`model`。配置了却无法解析的模型属于错误，会在启动时报出而非等到上下文写满；压缩也不会回退到主模型——那会把对话发往你未选择的地方。
+
+**阈值跟随摘要模型，而非主模型。** Pi 在主模型窗口将满时压缩，1M 主模型约为 98.3 万 token，而 256k 的摘要模型读不下。因此扩展会提前压缩，阈值为摘要模型窗口减去 `reserveTokens`。`/protecter status` 会显示目标模型与生效阈值。
+
+发往该模型的内容同样先经脱敏，因此可信端点改善的是可靠性、成本与隐私，摘要描述的仍是替换值而非原始值。
 
 有两项代价无法避免：额外的摘要请求会消耗 token；模型推理的是替换值，摘要对受保护值的描述可能不准确。
 

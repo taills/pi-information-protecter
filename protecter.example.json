@@ -1,6 +1,8 @@
 {
   "version": 1,
-  "compaction": "ask",
+  "compaction": {
+    "mode": "ask"
+  },
   "sensitiveWords": [
     "张三",
     {

@@ -1,5 +1,28 @@
 # Changelog / 更新日志
 
+## 0.9.0 — A dedicated summarization model / 专用摘要模型
+
+### Added / 新增
+
+- Support a dedicated summarization model through `compaction.provider` and `compaction.model`. `contextWindow` is inherited from Pi's model catalogue and `reserveTokens` from Pi's own compaction settings, so both are overrides rather than required fields. Summarizing sends the whole conversation, redacted, to a second destination, so it can now be a local or otherwise trusted endpoint.
+  通过 `compaction.provider` 与 `compaction.model` 支持专用摘要模型。`contextWindow` 继承自 Pi 的模型目录，`reserveTokens` 继承自 Pi 自身的压缩设置，二者均为覆盖项而非必填。生成摘要会把脱敏后的整段对话发往第二个目的地，现在它可以是本地或其他可信端点。
+- Drive the compaction threshold from the summarization model's window instead of the main model's. Pi compacts near the main window, about 983k tokens for a 1M model, which a 256k summarizer cannot read; compaction now happens at the summarization model's window minus the reserve.
+  压缩阈值改为依据摘要模型的窗口而非主模型。Pi 在主窗口附近压缩（1M 模型约 98.3 万 token），而 256k 的摘要模型读不下；现在按摘要模型窗口减去预留触发。
+- Resolve and report a configured summarization model at startup, and never fall back to the main model when it cannot be resolved, which would send the conversation to a destination the user did not choose.
+  在启动时解析并反馈配置的摘要模型；无法解析时不回退到主模型，以免把对话发往用户未选择的目的地。
+- Show the compaction target and effective threshold in `/protecter status`.
+  在 `/protecter status` 中显示压缩目标与生效阈值。
+
+### Fixed / 修复
+
+- Record the summarization provider in the audit log instead of the conversation's provider. The audit answers where plaintext went, so filing a summary sent to a dedicated model under the main model's provider made that record wrong.
+  审计日志记录摘要使用的 provider，而非对话模型的 provider。审计的作用是回答明文去了哪里，把发往专用模型的摘要记在主模型名下会使该记录失真。
+
+### Changed / 变更
+
+- Degrade to a local, deterministic summary when the summarization call fails or returns nothing, instead of cancelling compaction. The local summary is built from the same redacted messages and sends nothing. Compaction still cancels if redaction itself fails.
+  摘要调用失败或返回空时降级为本地确定性摘要，而不再取消压缩。本地摘要基于同一批已脱敏消息生成且不发送任何内容；若脱敏本身失败，压缩仍然取消。
+
 ## 0.8.4 — Summarization failures report their kind / 摘要失败上报失败类型
 
 ### Added / 新增

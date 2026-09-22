@@ -183,9 +183,17 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Could not summarize the redacted conversation",
     "Retry; if it persists, set \"compaction\" to \"off\" and use /new",
   ],
+  COMPACT_EMPTY: [
+    "The model returned an empty summary",
+    "A local summary was used instead; no action is required",
+  ],
   CONFIG_COMPACTION: [
     "Invalid compaction setting",
-    'Use "ask", "protected" or "off"',
+    'Use "ask", "protected" or "off", or an object with mode, provider, model, contextWindow and reserveTokens',
+  ],
+  CONFIG_COMPACT_MODEL: [
+    "The compaction model cannot be resolved",
+    "Set both provider and model, check their spelling, and sign in to that provider",
   ],
   AUDIT_BATCH_LIMIT: [
     "Audit batch exceeds the size limit",
@@ -318,9 +326,17 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
     "无法对脱敏后的会话生成摘要",
     "请重试；若持续失败，将 \"compaction\" 设为 \"off\" 并使用 /new",
   ],
+  COMPACT_EMPTY: [
+    "模型返回了空摘要",
+    "已改用本地摘要，无需处理",
+  ],
   CONFIG_COMPACTION: [
     "compaction 配置值无效",
-    '请使用 "ask"、"protected" 或 "off"',
+    '请使用 "ask"、"protected"、"off"，或含 mode、provider、model、contextWindow、reserveTokens 的对象',
+  ],
+  CONFIG_COMPACT_MODEL: [
+    "无法解析压缩模型",
+    "请同时填写 provider 和 model、核对拼写，并登录该提供商",
   ],
   AUDIT_BATCH_LIMIT: ["审计批次超过上限", "减少单个请求的命中内容"],
   AUDIT_FULL: ["审计日志将超过上限", "检查记录后清空日志或本地归档"],
@@ -375,6 +391,15 @@ const UI_EN = {
   compactWorking: "SPI Protecter: summarizing redacted text\u2026",
   compactDone:
     "SPI Protecter: compaction summary generated from redacted text.",
+  compactDegraded:
+    "SPI Protecter: the model produced no usable summary, so a local one was used. It lists facts rather than interpreting them, so earlier context is less detailed.",
+  compactModelConfigured:
+    "SPI Protecter: compaction will summarize with {model}. It receives the whole conversation, redacted, so prefer a local or otherwise trusted endpoint.",
+  compactEarly:
+    "SPI Protecter: compacting early at {tokens} so the summarization model can still read the conversation.",
+  compactMainModel: "the current model",
+  compactNoThreshold: "Pi's own threshold",
+  statusCompaction: "Compaction: {mode} via {target}; compacts above {threshold}.",
   compactAlwaysNotice:
     "SPI Protecter: compaction allowed for this session. Set \"compaction\" in the local config to make it permanent.",
   compactDenyNotice:
@@ -393,6 +418,15 @@ const UI_ZH: Record<UiKey, string> = {
   compactDenyAlways: "本会话内全部拒绝",
   compactWorking: "SPI Protecter：正在对脱敏内容生成摘要…",
   compactDone: "SPI Protecter：已基于脱敏内容生成压缩摘要。",
+  compactDegraded:
+    "SPI Protecter：模型未产出可用摘要，已改用本地摘要。它只罗列事实而不做理解，因此早期上下文会更粗略。",
+  compactModelConfigured:
+    "SPI Protecter：压缩将使用 {model} 生成摘要。它会收到脱敏后的整段对话，请优先使用本地或可信端点。",
+  compactEarly:
+    "SPI Protecter：已在 {tokens} 提前压缩，以便摘要模型仍能读取该对话。",
+  compactMainModel: "当前模型",
+  compactNoThreshold: "Pi 自身阈值",
+  statusCompaction: "压缩：{mode}，经由 {target}；超过 {threshold} 时压缩。",
   compactAlwaysNotice:
     "SPI Protecter：本会话内允许压缩。如需永久生效，请在本地配置中设置 \"compaction\"。",
   compactDenyNotice:
@@ -477,11 +511,13 @@ const COUNTS = {
     rules: { one: "{n} rule", other: "{n} rules" },
     mappings: { one: "{n} mapping", other: "{n} mappings" },
     bytes: { one: "{n} byte", other: "{n} bytes" },
+    tokens: { one: "{n} token", other: "{n} tokens" },
   },
   zh: {
     rules: { other: "规则 {n} 条" },
     mappings: { other: "映射 {n} 个" },
     bytes: { other: "{n} 字节" },
+    tokens: { other: "{n} token" },
   },
 } as const;
 

@@ -1,4 +1,5 @@
 import {
+  DEFAULT_COMPACTION_SETTINGS,
   generateBranchSummary,
   generateSummaryWithUsage,
   type CompactionResult,
@@ -6,7 +7,13 @@ import {
   type SessionBeforeCompactEvent,
   type SessionBeforeTreeEvent,
 } from "@earendil-works/pi-coding-agent";
-import { failure, sanitizeError, type Details } from "./diagnostics.ts";
+import {
+  failure,
+  sanitizeError,
+  type Details,
+  type Diagnostic,
+} from "./diagnostics.ts";
+import { type CompactionSettings } from "./config.ts";
 
 /**
  * Identify a summarization failure without quoting anything from it. A class
@@ -51,11 +58,67 @@ export type Summarizer = typeof generateSummaryWithUsage;
 export type BranchSummarizer = typeof generateBranchSummary;
 
 /**
+ * Prefer the configured summarization model. Sending the conversation to a
+ * second destination is the point of the setting, so a configured model that
+ * cannot be resolved is an error rather than a silent fall back to the main
+ * model, which would send the conversation somewhere the user did not choose.
+ * 优先使用配置的摘要模型。该设置的目的就是把对话发往第二个目的地，因此配了却解析不到
+ * 应当报错，而不是静默回退到主模型——那会把对话发往用户未选择的地方。
+ */
+export function resolveCompactionModel(
+  ctx: ExtensionContext,
+  settings?: CompactionSettings,
+): ExtensionContext["model"] {
+  if (!settings?.provider || !settings.model) return ctx.model;
+  const found = ctx.modelRegistry.find(settings.provider, settings.model);
+  if (!found) throw failure("CONFIG_COMPACT_MODEL");
+  return found;
+}
+
+/**
+ * The compaction threshold must follow the summarization model, not the main
+ * one: waiting for a 1M window before summarizing with a 256k model hands it
+ * more text than it can read.
+ * 压缩阈值必须跟随摘要模型而非主模型：用 256k 的模型摘要却等到 1M 窗口才触发，
+ * 交给它的文本会超出其可读取范围。
+ */
+export function compactionBudget(
+  ctx: ExtensionContext,
+  settings: CompactionSettings,
+  piReserveTokens?: number,
+): { window: number; reserve: number; threshold: number } | undefined {
+  let model: ExtensionContext["model"];
+  try {
+    model = resolveCompactionModel(ctx, settings);
+  } catch {
+    return undefined;
+  }
+  const window =
+    settings.contextWindow ??
+    (model as { contextWindow?: number } | undefined)?.contextWindow;
+  if (typeof window !== "number" || window <= 0) return undefined;
+  // Inherit Pi's effective reserve so it is configured in one place; the
+  // local setting is only an override for a summarization model that needs a
+  // different margin than the conversation model.
+  // 继承 Pi 的生效预留值，使其只需配置一处；本地设置仅在摘要模型需要与对话模型不同的
+  // 余量时作为覆盖。
+  const reserve =
+    settings.reserveTokens ??
+    piReserveTokens ??
+    DEFAULT_COMPACTION_SETTINGS.reserveTokens;
+  if (reserve >= window) return undefined;
+  return { window, reserve, threshold: window - reserve };
+}
+
+/**
  * Resolve request credentials without surfacing provider or key details.
  * 获取请求凭证，不暴露提供商或密钥细节。
  */
-async function resolveAuth(ctx: ExtensionContext) {
-  const model = ctx.model;
+async function resolveAuth(
+  ctx: ExtensionContext,
+  settings?: CompactionSettings,
+) {
+  const model = resolveCompactionModel(ctx, settings);
   if (!model) throw failure("COMPACT_UNAVAILABLE");
   let auth: Awaited<
     ReturnType<ExtensionContext["modelRegistry"]["getApiKeyAndHeaders"]>
@@ -115,12 +178,73 @@ function registryStreamFn(ctx: ExtensionContext) {
  * 生成压缩摘要且不发送任何受保护值。任何失败都抛出，调用方必须取消，
  * 而不能回退到 Pi 未脱敏的摘要流程。
  */
+/**
+ * Build a summary locally, with no model call at all.
+ *
+ * The model call is the fragile part: it needs its own routing and
+ * credentials, and it can return nothing. This runs on the already redacted
+ * messages, sends nothing and always produces something, so compaction
+ * degrades instead of failing. It is mechanical, not an LLM summary, so it
+ * keeps facts rather than reasoning.
+ * 完全不调用模型的本地摘要。模型调用是脆弱环节：需要单独的路由与凭证，且可能返回空内容。
+ * 本函数基于已脱敏的消息运行，不发送任何内容且总能产出结果，使压缩降级而非失败。
+ * 它是机械摘录而非模型摘要，保留事实而非推理。
+ */
+export function buildLocalSummary(messages: readonly unknown[]): string {
+  const requests: string[] = [];
+  const replies: string[] = [];
+  const tools = new Map<string, number>();
+  const clip = (value: string, limit: number) =>
+    value.length > limit ? `${value.slice(0, limit)}\u2026` : value;
+
+  for (const message of messages) {
+    const entry = message as { role?: unknown; content?: unknown };
+    if (!Array.isArray(entry.content)) continue;
+    for (const raw of entry.content) {
+      const block = raw as { type?: unknown; text?: unknown; name?: unknown };
+      if (block.type === "toolCall" && typeof block.name === "string")
+        tools.set(block.name, (tools.get(block.name) ?? 0) + 1);
+      if (block.type !== "text" || typeof block.text !== "string") continue;
+      const text = block.text.trim();
+      if (!text) continue;
+      if (entry.role === "user") requests.push(clip(text, 300));
+      else if (entry.role === "assistant") replies.push(clip(text, 300));
+    }
+  }
+
+  const used = [...tools.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([name, count]) => `${name} x${count}`);
+  const sections = [
+    "# Local compaction summary",
+    "",
+    "Generated locally without a model call, so it lists facts rather than",
+    "interpreting them. Protected values appear as their replacements.",
+    "",
+    `- Messages summarized: ${messages.length}`,
+    used.length ? `- Tools used: ${used.join(", ")}` : "",
+    "",
+    "## Requests",
+    ...(requests.length
+      ? requests.slice(-12).map((value) => `- ${value}`)
+      : ["- (none recorded)"]),
+    "",
+    "## Latest replies",
+    ...(replies.length
+      ? replies.slice(-6).map((value) => `- ${value}`)
+      : ["- (none recorded)"]),
+  ];
+  return sections.filter((line) => line !== "").join("\n");
+}
+
 export async function buildProtectedSummary(
   event: SessionBeforeCompactEvent,
   ctx: ExtensionContext,
   engine: SummaryEngine,
   provider: string,
   summarize: Summarizer = generateSummaryWithUsage,
+  settings?: CompactionSettings,
 ): Promise<CompactionResult> {
   const { preparation } = event;
 
@@ -142,11 +266,11 @@ export async function buildProtectedSummary(
       ? undefined
       : ((await engine.redact(event.customInstructions, provider)) as string);
 
-  const auth = await resolveAuth(ctx);
-
-  let text: string;
+  let text = "";
   let usage: CompactionResult["usage"];
+  let degraded: Diagnostic | undefined;
   try {
+    const auth = await resolveAuth(ctx, settings);
     const result = await summarize(
       redacted,
       auth.model,
@@ -160,18 +284,36 @@ export async function buildProtectedSummary(
       registryStreamFn(ctx) as never,
       auth.env,
     );
-    text = result.text;
+    text = typeof result.text === "string" ? result.text : "";
     usage = result.usage;
+    // An empty answer is not a failed call, but it is not a summary either.
+    // 空回答不算调用失败，但也不是摘要。
+    if (!text.trim()) degraded = failure("COMPACT_EMPTY").diagnostic;
   } catch (error) {
     // Keep the sanitized cause: codes, an allow-listed errno, the error class
     // name and an HTTP status only, never the provider message.
     // 保留经净化的原因：仅错误码、白名单 errno、错误类名和 HTTP 状态码，不包含提供商消息。
     const safe = sanitizeError(error, "COMPACT_FAILED");
-    throw safe.diagnostic.code === "COMPACT_FAILED"
-      ? failure("COMPACT_FAILED", errorIdentity(error))
-      : safe;
+    degraded =
+      safe.diagnostic.code === "COMPACT_FAILED"
+        ? failure("COMPACT_FAILED", errorIdentity(error)).diagnostic
+        : safe.diagnostic;
   }
-  if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");
+
+  // Degrade to the local summary rather than cancelling: it is built from the
+  // same redacted messages, so it cannot leak, and it keeps compaction usable
+  // where the extra model call is not.
+  // 降级为本地摘要而不取消：它基于同一批已脱敏消息，不会泄露，并在额外模型调用不可用时
+  // 保持压缩可用。
+  if (degraded)
+    return {
+      summary: engine.restoreText(buildLocalSummary(redacted)),
+      firstKeptEntryId: preparation.firstKeptEntryId,
+      tokensBefore: preparation.tokensBefore,
+      // The caller reports this, so a degraded summary is never silent.
+      // 调用方会上报该信息，降级不会静默发生。
+      details: { protecter: degraded },
+    };
 
   // The summary is stored locally, so restore it like any assistant text; the
   // next outgoing request redacts it again.
@@ -200,6 +342,7 @@ export async function buildProtectedBranchSummary(
   engine: SummaryEngine,
   provider: string,
   summarize: BranchSummarizer = generateBranchSummary,
+  settings?: CompactionSettings,
 ): Promise<ProtectedBranchSummary> {
   const { preparation } = event;
   // Session entries are ordinary JSON, so the same scan covers them.
@@ -215,7 +358,7 @@ export async function buildProtectedBranchSummary(
           preparation.customInstructions,
           provider,
         )) as string);
-  const auth = await resolveAuth(ctx);
+  const auth = await resolveAuth(ctx, settings);
 
   let result: Awaited<ReturnType<BranchSummarizer>>;
   try {

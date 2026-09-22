@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Protecter } from "../src/engine.ts";
-import { type Rule } from "../src/config.ts";
+import { parseConfig, type Rule } from "../src/config.ts";
 
 async function fixture(t: { after(fn: () => void): void }, rules: Rule[]) {
   const dir = fs.mkdtempSync(join(tmpdir(), "spi-shape-"));
@@ -343,6 +343,25 @@ test("no shipped rule matches a very short string / 示例规则不匹配极短�
       `rule ${index + 1} matches short strings: ${short.map((v) => JSON.stringify(v)).join(", ")}`,
     );
   }
+});
+
+test("the shipped example is safe to copy as is / 示例配置可直接复制使用", () => {
+  // A placeholder endpoint parses but fails to resolve at startup, so copying
+  // the example would break the session before it starts.
+  // 占位端点能通过解析却在启动时无法解析，直接复制示例会让会话尚未开始就失败。
+  const raw = fs.readFileSync("protecter.example.json", "utf8");
+  const example = JSON.parse(raw) as {
+    compaction?: { provider?: string; model?: string };
+  };
+  assert.equal(
+    example.compaction?.provider,
+    undefined,
+    "the example must not name an endpoint the reader does not have",
+  );
+  assert.equal(example.compaction?.model, undefined);
+  // It must still parse, so the shape stays a working starting point.
+  // 仍须可解析，以保证它是可用的起点。
+  assert.doesNotThrow(() => parseConfig(raw));
 });
 
 test("shipped example rules load and protect their targets / 示例配置可加载并生效", async (t) => {

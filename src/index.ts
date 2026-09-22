@@ -10,6 +10,8 @@ import { blocksConfigAccess } from "./guard.ts";
 import {
   buildProtectedBranchSummary,
   buildProtectedSummary,
+  compactionBudget,
+  resolveCompactionModel,
 } from "./compaction.ts";
 import {
   failure,
@@ -53,6 +55,26 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         t("statusBarRules", { rules: count("rules", rules) }),
       );
       if (rules === 0) ctx.ui.notify(t("emptyRules"), "warning");
+      // Resolve the configured summarization model now: discovering it is
+      // wrong once the context is full leaves no way forward.
+      // 立即解析配置的摘要模型：等上下文冒满才发现配错，就无路可走了。
+      const compaction = engine.compaction;
+      if (compaction.provider && compaction.model) {
+        try {
+          resolveCompactionModel(ctx, compaction);
+          ctx.ui.notify(
+            t("compactModelConfigured", {
+              model: `${compaction.model} @ ${compaction.provider}`,
+            }),
+            "info",
+          );
+        } catch (error) {
+          ctx.ui.notify(
+            record(sanitizeError(error, "CONFIG_COMPACT_MODEL").diagnostic),
+            "error",
+          );
+        }
+      }
     } catch (error) {
       healthy = false;
       ctx.ui.setStatus("protecter", t("statusBarNotReady"));
@@ -151,6 +173,53 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   });
 
   /**
+   * Pi triggers compaction against the main model's window. A smaller
+   * summarization model would then be handed more text than it can read, so
+   * compact earlier, against its window instead.
+   * Pi 按主模型的窗口触发压缩。若摘要模型更小，交给它的文本会超出可读取范围，
+   * 因此改为按它的窗口提前压缩。
+   */
+  let compactingEarly = false;
+  // Pi's effective reserve, seen when it prepares a compaction. Inheriting it
+  // keeps the margin configured in one place instead of two.
+  // Pi 准备压缩时暴露的生效预留值。继承它使余量只需在一处配置。
+  let piReserveTokens: number | undefined;
+  /**
+   * The audit records where data went, so a summary sent to a dedicated model
+   * must not be filed under the conversation's provider.
+   * 审计记录的是数据去向，因此发往专用模型的摘要不得记在对话模型的 provider 下。
+   */
+  const summarizationProvider = (ctx: Pick<ExtensionContext, "model">) =>
+    engine.compaction.provider ?? ctx.model?.provider ?? "unknown";
+  pi.on("agent_settled", (_event, ctx) => {
+    if (!healthy || compactingEarly) return;
+    const settings = engine.compaction;
+    if (settings.mode === "off") return;
+    const budget = compactionBudget(ctx, settings, piReserveTokens);
+    if (!budget) return;
+    const usage = ctx.getContextUsage();
+    const tokens = usage?.tokens;
+    if (typeof tokens !== "number") return;
+    // Only act when Pi would not have compacted yet; otherwise let it run.
+    // 仅在 Pi 尚不会压缩时介入，否则交由它处理。
+    if (tokens <= budget.threshold) return;
+    if (usage && tokens > usage.contextWindow - budget.reserve) return;
+    compactingEarly = true;
+    ctx.ui.notify(
+      t("compactEarly", { tokens: count("tokens", tokens) }),
+      "info",
+    );
+    ctx.compact({
+      onComplete: () => {
+        compactingEarly = false;
+      },
+      onError: () => {
+        compactingEarly = false;
+      },
+    });
+  });
+
+  /**
    * Pi summarizes internally without passing the payload through
    * `before_provider_request`, so letting it summarize would send the stored
    * conversation, which holds restored plaintext, to the provider. Summarize
@@ -199,6 +268,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   };
 
   pi.on("session_before_compact", async (event, ctx) => {
+    const reserve = event.preparation.settings?.reserveTokens;
+    if (typeof reserve === "number" && Number.isSafeInteger(reserve))
+      piReserveTokens = reserve;
     try {
       await allowSummarization(ctx, event.signal);
       ctx.ui.notify(t("compactWorking"), "info");
@@ -206,9 +278,18 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         event,
         ctx,
         engine,
-        ctx.model?.provider ?? "unknown",
+        summarizationProvider(ctx),
+        undefined,
+        engine.compaction,
       );
-      ctx.ui.notify(t("compactDone"), "info");
+      // A degraded summary must be visible, not silently accepted.
+      // 降级的摘要必须可见，不能静默接受。
+      const fallback = (summary.details as { protecter?: Diagnostic })
+        ?.protecter;
+      if (fallback) {
+        ctx.ui.notify(t("compactDegraded"), "warning");
+        ctx.ui.notify(record(fallback), "warning");
+      } else ctx.ui.notify(t("compactDone"), "info");
       return { compaction: summary };
     } catch (error) {
       // Cancel rather than fall through to Pi's unredacted summarization.
@@ -233,7 +314,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         event,
         ctx,
         engine,
-        ctx.model?.provider ?? "unknown",
+        summarizationProvider(ctx),
+        undefined,
+        engine.compaction,
       );
       ctx.ui.notify(t("compactDone"), "info");
       return { summary };
@@ -344,10 +427,30 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         rules: count("rules", engine.ruleCount),
         mappings: count("mappings", engine.mappingCount),
       });
+      // Show the compaction target and threshold: a summarization model with a
+      // smaller window changes when compaction happens, which is not otherwise
+      // visible anywhere.
+      // 展示压缩目标与阈值：窗口更小的摘要模型会改变压缩时机，而这一点别处无从得知。
+      const settings = engine.compaction;
+      const budget = compactionBudget(ctx, settings, piReserveTokens);
+      const target =
+        settings.provider && settings.model
+          ? `${settings.model} @ ${settings.provider}`
+          : t("compactMainModel");
+      const compactLine = `\n${t("statusCompaction", {
+        mode: settings.mode,
+        target,
+        threshold: budget
+          ? count("tokens", budget.threshold)
+          : t("compactNoThreshold"),
+      })}`;
       const detail = last
         ? `\n${t("statusLastBlock", { at: lastBlock?.at ?? "" })}\n${last}`
         : `\n${t("statusNoBlock")}`;
-      ctx.ui.notify(summary + detail, engine.ready ? "info" : "error");
+      ctx.ui.notify(
+        summary + compactLine + detail,
+        engine.ready ? "info" : "error",
+      );
     },
   });
   pi.on("session_shutdown", () => engine.close());
