@@ -53,6 +53,38 @@ async function resolveAuth(ctx: ExtensionContext) {
 }
 
 /**
+ * Without a stream function the summarizer issues a bare provider call using
+ * only the passed key, bypassing Pi's request preparation, which is what
+ * resolves OAuth tokens and provider base URLs. Route through the model
+ * registry instead, which authenticates at request time.
+ * 不传流函数时，摘要会只用传入的密钥发起裸请求，绕过 Pi 的请求准备（OAuth 令牌
+ * 与 provider 地址由它解析）。改为经由模型注册表，在请求时完成认证。
+ *
+ * `streamSimple` exists from Pi 0.86; `complete` covers 0.84 and 0.85.
+ * `streamSimple` 从 Pi 0.86 提供，`complete` 覆盖 0.84 与 0.85。
+ */
+function registryStreamFn(ctx: ExtensionContext) {
+  // SAFETY: the supported Pi range declares different ModelRegistry members,
+  // so the methods are treated as optional and every use is guarded by a
+  // typeof check before being called. Nothing is assumed to exist.
+  // SAFETY：受支持的 Pi 版本范围内 ModelRegistry 成员不同，因此将方法视为可选，
+  // 每次调用前都经 typeof 检查，不假设任何成员存在。
+  const registry = ctx.modelRegistry as unknown as {
+    streamSimple?: (...args: unknown[]) => { result(): Promise<unknown> };
+    complete?: (...args: unknown[]) => Promise<unknown>;
+  };
+  if (typeof registry.streamSimple === "function")
+    return (model: unknown, context: unknown, options: unknown) =>
+      registry.streamSimple!(model, context, options);
+  if (typeof registry.complete === "function")
+    return (model: unknown, context: unknown, options: unknown) => ({
+      // completeSummarization only awaits result(). / completeSummarization 仅等待 result()。
+      result: () => registry.complete!(model, context, options),
+    });
+  return undefined;
+}
+
+/**
  * Build a compaction summary without ever sending protected values.
  * Every failure throws, because the caller must cancel rather than fall back
  * to Pi's unredacted summarization.
@@ -101,7 +133,7 @@ export async function buildProtectedSummary(
       instructions,
       previous,
       ctx.thinkingLevel,
-      undefined,
+      registryStreamFn(ctx) as never,
       auth.env,
     );
     text = result.text;
@@ -168,6 +200,7 @@ export async function buildProtectedBranchSummary(
       signal: event.signal,
       customInstructions: instructions,
       replaceInstructions: preparation.replaceInstructions,
+      streamFn: registryStreamFn(ctx) as never,
     });
   } catch (error) {
     throw sanitizeError(error, "COMPACT_FAILED");

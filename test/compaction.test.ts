@@ -336,6 +336,73 @@ test("branch summaries fail closed / 分支摘要失败时拒绝放行", async (
   );
 });
 
+test("summarization routes through the model registry / 摘要经由模型注册表发起", async (t) => {
+  // Without a stream function the summarizer issues a bare provider call using
+  // only the passed key, which bypasses OAuth refresh and provider base URLs.
+  // 不传流函数时会发起裸请求，绕过 OAuth 刷新与 provider 地址解析。
+  const engine = await engineWith(t);
+  const event = fixtureEvent([{ role: "user", content: "13800138000" }]);
+
+  // Pi 0.86+: streamSimple is preferred. / Pi 0.86+ 优先使用 streamSimple。
+  let usedStreamSimple = false;
+  let streamFnSeen: unknown;
+  await buildProtectedSummary(
+    event,
+    fixtureCtx({
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "k" }),
+        streamSimple: () => {
+          usedStreamSimple = true;
+          return { result: async () => ({ text: "s" }) };
+        },
+        complete: async () => ({ text: "never" }),
+      },
+    }),
+    engine,
+    "demo",
+    (async (...args: unknown[]) => {
+      streamFnSeen = args[9];
+      return { text: "ok", usage: undefined };
+    }) as unknown as Summarizer,
+  );
+  assert.equal(typeof streamFnSeen, "function", "a stream function must be passed");
+  await (streamFnSeen as (...a: unknown[]) => { result(): Promise<unknown> })(
+    {},
+    {},
+    {},
+  ).result();
+  assert.equal(usedStreamSimple, true, "streamSimple must be preferred");
+
+  // Pi 0.84/0.85: complete is adapted instead. / Pi 0.84/0.85 改用 complete 适配。
+  let usedComplete = false;
+  let legacySeen: unknown;
+  await buildProtectedSummary(
+    event,
+    fixtureCtx({
+      modelRegistry: {
+        getApiKeyAndHeaders: async () => ({ ok: true as const, apiKey: "k" }),
+        complete: async () => {
+          usedComplete = true;
+          return { text: "s" };
+        },
+      },
+    }),
+    engine,
+    "demo",
+    (async (...args: unknown[]) => {
+      legacySeen = args[9];
+      return { text: "ok", usage: undefined };
+    }) as unknown as Summarizer,
+  );
+  assert.equal(typeof legacySeen, "function");
+  await (legacySeen as (...a: unknown[]) => { result(): Promise<unknown> })(
+    {},
+    {},
+    {},
+  ).result();
+  assert.equal(usedComplete, true, "complete must be used when streamSimple is absent");
+});
+
 test("compaction mode is configurable and validated / 压缩模式可配置且经校验", async (t) => {
   for (const mode of ["ask", "protected", "off"]) {
     const parsed = parseConfig(

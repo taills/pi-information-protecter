@@ -1,5 +1,14 @@
 # Changelog / 更新日志
 
+## 0.8.3 — Summarize through the model registry / 经由模型注册表生成摘要
+
+### Fixed / 修复
+
+- Route summarization through `modelRegistry.streamSimple`, falling back to `complete` before Pi 0.86. Passing no stream function made the summarizer issue a bare provider call with only the resolved key, bypassing Pi's request preparation, which is what refreshes OAuth tokens and applies provider base URLs. Compaction therefore failed with `COMPACT_FAILED` on providers that need either.
+  摘要改为经由 `modelRegistry.streamSimple` 发起，Pi 0.86 之前回退到 `complete`。此前不传流函数会导致摘要仅用已解析的密钥发起裸请求，绕过 Pi 的请求准备（OAuth 令牌刷新与 provider 地址由其处理），因此在需要二者的提供商上压缩以 `COMPACT_FAILED` 失败。
+- Add a regression asserting a stream function is always passed, that `streamSimple` is preferred and that `complete` is used when it is absent.
+  新增回归，断言始终传入流函数、优先使用 `streamSimple`、缺失时使用 `complete`。
+
 ## 0.8.2 — Compaction diagnostics say what happened / 压缩诊断如实说明原因
 
 ### Fixed / 修复
