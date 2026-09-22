@@ -65,7 +65,11 @@ const COORDS = [
   "bytes",
   "limit",
   "timeoutMs",
+  "status",
 ] as const;
+// An error class name identifies the failure kind without quoting content.
+// 错误类名可标识失败类型，且不引用任何内容。
+const ERROR_NAME = /^[A-Za-z][A-Za-z0-9]{0,39}$/;
 const ERRNO =
   /^(EACCES|EPERM|ENOENT|ENOSPC|EDQUOT|EROFS|ELOOP|EISDIR|ENOTDIR|EMFILE|ENFILE|EIO|EEXIST|EBADF|EBUSY|ENOTEMPTY)$/;
 
@@ -76,7 +80,11 @@ export interface Details {
   bytes?: number;
   limit?: number;
   timeoutMs?: number;
+  /** HTTP status from a provider response. / 提供商响应的 HTTP 状态码。 */
+  status?: number;
   errno?: string;
+  /** Error class name only, never its message. / 仅错误类名，不包含消息。 */
+  errorName?: string;
 }
 export interface Diagnostic extends Details {
   code: DiagnosticCode;
@@ -102,12 +110,17 @@ export function diagnostic(
   }
   if (typeof details.errno === "string" && ERRNO.test(details.errno))
     safe.errno = details.errno;
+  if (
+    typeof details.errorName === "string" &&
+    ERROR_NAME.test(details.errorName)
+  )
+    safe.errorName = details.errorName;
   return { code, stage: stages[code], reason, action, ...safe };
 }
 
 export function formatDiagnostic(value: Diagnostic): string {
   const separator = getLocale() === "zh" ? "：" : ": ";
-  const coords = [...COORDS, "errno" as const]
+  const coords = [...COORDS, "errno" as const, "errorName" as const]
     .filter((key) => value[key] !== undefined)
     .map((key) => `${key}=${value[key]}`)
     .join(" ");

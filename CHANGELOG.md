@@ -1,5 +1,14 @@
 # Changelog / 更新日志
 
+## 0.8.4 — Summarization failures report their kind / 摘要失败上报失败类型
+
+### Added / 新增
+
+- Report the error class name and HTTP status when summarization fails. A single opaque `COMPACT_FAILED` could not separate authentication, transport and argument errors, so a failing `/compact` gave nothing to act on. The provider message is still never surfaced, and a class name that is not a plain identifier is dropped.
+  摘要失败时上报错误类名与 HTTP 状态码。单一不透明的 `COMPACT_FAILED` 无法区分认证、传输与参数错误，压缩失败时无从下手。仍然不输出提供商消息；非普通标识符的类名会被丢弃。
+- Add a regression asserting the kind is reported while the provider message and any protected value are not.
+  新增回归，断言上报失败类型而不输出提供商消息与受保护值。
+
 ## 0.8.3 — Summarize through the model registry / 经由模型注册表生成摘要
 
 ### Fixed / 修复

@@ -6,7 +6,31 @@ import {
   type SessionBeforeCompactEvent,
   type SessionBeforeTreeEvent,
 } from "@earendil-works/pi-coding-agent";
-import { failure, sanitizeError } from "./diagnostics.ts";
+import { failure, sanitizeError, type Details } from "./diagnostics.ts";
+
+/**
+ * Identify a summarization failure without quoting anything from it. A class
+ * name and an HTTP status separate authentication, transport and argument
+ * errors, which a single opaque code cannot.
+ * 在不引用任何内容的前提下标识摘要失败。类名与 HTTP 状态码能区分认证、传输和参数
+ * 错误，单一不透明的错误码做不到。
+ */
+function errorIdentity(error: unknown): Details {
+  const details: Details = {};
+  if (!error || typeof error !== "object") return details;
+  const name = (error as { name?: unknown }).name;
+  if (typeof name === "string") details.errorName = name;
+  else if (typeof error.constructor?.name === "string")
+    details.errorName = error.constructor.name;
+  for (const key of ["status", "statusCode"] as const) {
+    const value = (error as Record<string, unknown>)[key];
+    if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+      details.status = value;
+      break;
+    }
+  }
+  return details;
+}
 
 /**
  * Pi builds the summarization request internally and never routes it through
@@ -139,10 +163,13 @@ export async function buildProtectedSummary(
     text = result.text;
     usage = result.usage;
   } catch (error) {
-    // Keep the sanitized cause: the code and allow-listed errno only, never
-    // the provider message, which can quote the conversation.
-    // 保留经净化的原因：仅错误码与白名单 errno，不包含可能引用会话的提供商消息。
-    throw sanitizeError(error, "COMPACT_FAILED");
+    // Keep the sanitized cause: codes, an allow-listed errno, the error class
+    // name and an HTTP status only, never the provider message.
+    // 保留经净化的原因：仅错误码、白名单 errno、错误类名和 HTTP 状态码，不包含提供商消息。
+    const safe = sanitizeError(error, "COMPACT_FAILED");
+    throw safe.diagnostic.code === "COMPACT_FAILED"
+      ? failure("COMPACT_FAILED", errorIdentity(error))
+      : safe;
   }
   if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");
 
@@ -203,7 +230,10 @@ export async function buildProtectedBranchSummary(
       streamFn: registryStreamFn(ctx) as never,
     });
   } catch (error) {
-    throw sanitizeError(error, "COMPACT_FAILED");
+    const safe = sanitizeError(error, "COMPACT_FAILED");
+    throw safe.diagnostic.code === "COMPACT_FAILED"
+      ? failure("COMPACT_FAILED", errorIdentity(error))
+      : safe;
   }
   const text = result?.summary;
   if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");

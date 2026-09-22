@@ -221,6 +221,48 @@ test("compaction fails closed / 压缩失败时拒绝放行", async (t) => {
   );
 });
 
+test("a failure reports its kind without content / 失败上报类型而不带内容", async (t) => {
+  // One opaque code cannot separate authentication, transport and argument
+  // errors, which is what made three releases guess at the same failure.
+  // 单一不透明错误码无法区分认证、传输与参数错误，这正是三个版本反复猜测的原因。
+  const engine = await engineWith(t);
+  const event = fixtureEvent([{ role: "user", content: "13800138000" }]);
+  const thrown = (make: () => Error): Promise<string> =>
+    buildProtectedSummary(
+      event,
+      fixtureCtx(),
+      engine,
+      "demo",
+      (async () => {
+        throw make();
+      }) as unknown as Summarizer,
+    ).then(
+      () => "expected failure but succeeded",
+      (error: Error) => error.message,
+    );
+
+  const message = await thrown(() =>
+    Object.assign(new Error("unauthorized for 13800138000"), {
+      name: "AuthenticationError",
+      status: 401,
+    }),
+  );
+  assert.match(message, /code=COMPACT_FAILED/);
+  assert.match(message, /errorName=AuthenticationError/);
+  assert.match(message, /status=401/);
+  // The provider message must never appear. / 提供商消息绝不出现。
+  assert.ok(!message.includes("13800138000"));
+  assert.ok(!message.includes("unauthorized"));
+
+  // A name that is not a plain identifier is dropped, not echoed.
+  // 非普通标识符的名称会被丢弃，不会回显。
+  const weird = await thrown(() =>
+    Object.assign(new Error("x"), { name: "13800138000 leaked" }),
+  );
+  assert.ok(!weird.includes("13800138000"));
+  assert.ok(!weird.includes("errorName="));
+});
+
 test("a provider error never leaks the original / 提供商错误不泄漏原文", async (t) => {
   const engine = await engineWith(t);
   const error = await buildProtectedSummary(
