@@ -1,5 +1,19 @@
 # Changelog / 更新日志
 
+## 0.8.2 — Compaction diagnostics say what happened / 压缩诊断如实说明原因
+
+### Fixed / 修复
+
+- Add catalog text for `COMPACT_DENIED`, `COMPACT_UNAVAILABLE`, `COMPACT_FAILED` and `CONFIG_COMPACTION`. They were registered in 0.8.0 with a stage but no text, so every one rendered the `INTERNAL` fallback, in English regardless of locale, and told users to check the installed package instead of describing the real failure.
+  为四个压缩相关错误码补充文案。0.8.0 中它们只注册了阶段而没有文案，导致全部回退为 `INTERNAL` 文案，且不分语言都显示英文，提示用户去检查安装包而非说明真实原因。
+- Keep the sanitized cause when summarization fails, so the reported code reflects the actual failure instead of always being `COMPACT_FAILED`. The provider message is still never surfaced.
+  摘要失败时保留净化后的原因，使上报的错误码反映真实失败，而不总是 `COMPACT_FAILED`；仍然不输出提供商消息。
+
+### Added / 新增
+
+- Add a regression asserting that every registered diagnostic code has text in both languages, so a code can no longer ship with the fallback text.
+  新增回归，断言每个已注册的诊断码在两种语言中都有文案，避免再次带着回退文案发布。
+
 ## 0.8.1 — Example Bearer rule no longer matches short strings / 示例 Bearer 规则不再匹配短字符串
 
 ### Fixed / 修复

@@ -171,6 +171,22 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Restoring produced duplicate object keys",
     "Use more specific rules or fixed targets that cannot collide with schema keys",
   ],
+  COMPACT_DENIED: [
+    "Compaction refused",
+    "Allow it when asked, or set \"compaction\" to \"protected\" in the local config",
+  ],
+  COMPACT_UNAVAILABLE: [
+    "No model or credentials available to summarize",
+    "Select a model and sign in to its provider, then retry",
+  ],
+  COMPACT_FAILED: [
+    "Could not summarize the redacted conversation",
+    "Retry; if it persists, set \"compaction\" to \"off\" and use /new",
+  ],
+  CONFIG_COMPACTION: [
+    "Invalid compaction setting",
+    'Use "ask", "protected" or "off"',
+  ],
   AUDIT_BATCH_LIMIT: [
     "Audit batch exceeds the size limit",
     "Reduce matched content per request",
@@ -289,6 +305,22 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
   RESTORE_KEY_COLLISION: [
     "还原后对象键重复",
     "使用更具体的规则或固定替换目标，避免与结构键冲突",
+  ],
+  COMPACT_DENIED: [
+    "压缩被拒绝",
+    "询问时选择允许，或在本地配置中将 \"compaction\" 设为 \"protected\"",
+  ],
+  COMPACT_UNAVAILABLE: [
+    "没有可用于生成摘要的模型或凭证",
+    "选择模型并登录对应提供商后重试",
+  ],
+  COMPACT_FAILED: [
+    "无法对脱敏后的会话生成摘要",
+    "请重试；若持续失败，将 \"compaction\" 设为 \"off\" 并使用 /new",
+  ],
+  CONFIG_COMPACTION: [
+    "compaction 配置值无效",
+    '请使用 "ask"、"protected" 或 "off"',
   ],
   AUDIT_BATCH_LIMIT: ["审计批次超过上限", "减少单个请求的命中内容"],
   AUDIT_FULL: ["审计日志将超过上限", "检查记录后清空日志或本地归档"],

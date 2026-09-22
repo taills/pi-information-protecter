@@ -55,6 +55,8 @@ const stages = {
   AUDIT_IO: "audit",
 } as const;
 
+/** Exported so tests can assert every code has catalog text. / 导出以便测试断言每个错误码都有文案。 */
+export const STAGES = stages;
 export type DiagnosticCode = keyof typeof stages;
 const COORDS = [
   "rule",

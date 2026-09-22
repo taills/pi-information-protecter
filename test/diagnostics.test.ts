@@ -12,7 +12,13 @@ import {
   workerError,
 } from "../src/diagnostics.ts";
 import { type Rule } from "../src/config.ts";
-import { detectLocale, setLocale } from "../src/locale.ts";
+import { describeCode, detectLocale, setLocale, type Locale } from "../src/locale.ts";
+import { STAGES } from "../src/diagnostics.ts";
+
+function describeCodeFor(locale: Locale, code: string) {
+  setLocale(locale);
+  return describeCode(code);
+}
 
 async function fixture(
   t: { after(fn: () => void): void },
@@ -45,6 +51,24 @@ async function codeOf(action: Promise<unknown>) {
     return "NO_ERROR";
   return error.message.match(/code=([A-Z_]+)/)?.[1] ?? "UNPARSED";
 }
+
+test("every code has text in both languages / 每个错误码在两种语言中都有文案", (t) => {
+  // A code registered without catalog text silently renders the INTERNAL
+  // fallback, which misdescribes the failure and sends users the wrong way.
+  // 只注册错误码而没有文案时，会静默呈现 INTERNAL 回退文案，描述错误并误导用户。
+  t.after(() => setLocale(detectLocale()));
+  const fallback = { en: describeCodeFor("en", "INTERNAL"), zh: describeCodeFor("zh", "INTERNAL") };
+  const missing: string[] = [];
+  for (const code of Object.keys(STAGES)) {
+    if (code === "INTERNAL") continue;
+    for (const locale of ["en", "zh"] as const) {
+      const text = describeCodeFor(locale, code);
+      if (text.reason === fallback[locale].reason)
+        missing.push(`${code} (${locale})`);
+    }
+  }
+  assert.deepEqual(missing, [], `codes without text: ${missing.join(", ")}`);
+});
 
 test("diagnostics expose code, stage and action in one language / 诊断以单一语言输出错误码、阶段和建议", (t) => {
   t.after(() => setLocale(detectLocale()));

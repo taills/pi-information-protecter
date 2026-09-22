@@ -6,7 +6,7 @@ import {
   type SessionBeforeCompactEvent,
   type SessionBeforeTreeEvent,
 } from "@earendil-works/pi-coding-agent";
-import { failure } from "./diagnostics.ts";
+import { failure, sanitizeError } from "./diagnostics.ts";
 
 /**
  * Pi builds the summarization request internally and never routes it through
@@ -106,8 +106,11 @@ export async function buildProtectedSummary(
     );
     text = result.text;
     usage = result.usage;
-  } catch {
-    throw failure("COMPACT_FAILED");
+  } catch (error) {
+    // Keep the sanitized cause: the code and allow-listed errno only, never
+    // the provider message, which can quote the conversation.
+    // 保留经净化的原因：仅错误码与白名单 errno，不包含可能引用会话的提供商消息。
+    throw sanitizeError(error, "COMPACT_FAILED");
   }
   if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");
 
@@ -166,8 +169,8 @@ export async function buildProtectedBranchSummary(
       customInstructions: instructions,
       replaceInstructions: preparation.replaceInstructions,
     });
-  } catch {
-    throw failure("COMPACT_FAILED");
+  } catch (error) {
+    throw sanitizeError(error, "COMPACT_FAILED");
   }
   const text = result?.summary;
   if (typeof text !== "string" || !text.trim()) throw failure("COMPACT_FAILED");
