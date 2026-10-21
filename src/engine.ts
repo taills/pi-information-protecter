@@ -88,6 +88,14 @@ export class Protecter {
   get compactionMode(): CompactionMode {
     return this.compaction.mode;
   }
+  /**
+   * The configuration as written, so settings that no longer apply can be
+   * reported instead of silently ignored.
+   * 原样配置，以便对已不生效的设置给出提示而非静默忽略。
+   */
+  get rawCompaction() {
+    return this.snapshot?.config.compaction;
+  }
   get ready(): boolean {
     return !!this.snapshot && !this.closed;
   }

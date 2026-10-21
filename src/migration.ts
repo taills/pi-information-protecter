@@ -112,23 +112,13 @@ export function mergeConfigs(configs: Config[]): Config {
   const mode = order.find((value) =>
     settings.some((entry) => entry.mode === value),
   );
-  // Keep the first declared model; merging two different endpoints would pick
-  // a destination the user never chose.
-  // 保留首个声明的模型；合并两个不同端点会选出用户从未选择的目的地。
-  const declared = settings.find((entry) => entry.provider && entry.model);
+  // Only the mode survives a merge. Settings that selected a summarization
+  // model no longer apply, so merging them forward would preserve a choice
+  // that has no effect and keep reporting it as ignored.
+  // 合并后只保留 mode。用于选择摘要模型的设置已不生效，继续合并只会保留一个毫无
+  // 作用的选择，并持续被当作已忽略项上报。
   const merged: Config = { version: 1, sensitiveWords: rules };
-  if (mode !== undefined || declared !== undefined) {
-    const compaction: CompactionSettings = { mode: mode ?? DEFAULT_COMPACTION };
-    if (declared) {
-      compaction.provider = declared.provider;
-      compaction.model = declared.model;
-      if (declared.contextWindow !== undefined)
-        compaction.contextWindow = declared.contextWindow;
-      if (declared.reserveTokens !== undefined)
-        compaction.reserveTokens = declared.reserveTokens;
-    }
-    merged.compaction = compaction;
-  }
+  if (mode !== undefined) merged.compaction = { mode };
   const raw = JSON.stringify(merged);
   if (Buffer.byteLength(raw) > 1024 * 1024)
     throw failure("CONFIG_SIZE", {

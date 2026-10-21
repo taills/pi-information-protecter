@@ -17,7 +17,7 @@ Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x, 0.
 pi install npm:pi-information-protecter
 
 # Pin a version only when you have a reason to; older releases miss fixes.
-pi install npm:pi-information-protecter@0.10.0
+pi install npm:pi-information-protecter@0.11.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -133,24 +133,33 @@ Replacements are checked so restoration stays exact: a candidate is rejected if 
 
 All notifications, prompts and diagnostics render in a single language, chosen from the environment: `PI_PROTECTER_LANG`, then `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE`, then the runtime locale. `zh*` selects Simplified Chinese; anything else falls back to English. Set `PI_PROTECTER_LANG=en` or `PI_PROTECTER_LANG=zh` to override. Error codes, stages and numeric details stay language-neutral so they can be searched and reported.
 
-### Context compaction
+### Context compaction and every hookless path
 
-Pi builds the summarization request inside its own compaction code and passes it straight to the provider. That request carries no `onPayload` callback, so **`before_provider_request` never fires for it** and this extension cannot redact it. Letting Pi summarize would send the stored conversation, which holds restored plaintext, to the provider in full.
+Only the agent loop's own requests carry Pi's `onPayload` callback, and that callback is what fires `before_provider_request`. Pi builds the requests below from scratch, with no callback and, for most of them, no extension event at all:
 
-Instead the extension produces the summary itself:
+| Path | Pi's own hook | How it is covered |
+| --- | --- | --- |
+| Agent requests, prompt-cache warming | `onPayload` | `before_provider_request` |
+| Context compaction, split-turn prefix summaries | `session_before_compact` | The `preparation` Pi is about to summarize is redacted in place |
+| `/tree` branch summaries | `session_before_tree` | `entriesToSummarize` and the instructions are redacted in place |
+| `/bug` report summary | none | Model-runtime guard |
+| `codemode` `models.classify()`, `models.generateImages()` | none | Model-runtime guard |
+| Nested model calls by other extensions | none | Model-runtime guard |
 
-1. `preparation.messagesToSummarize`, the previous summary and any custom instructions are redacted through the same bounded worker as an outgoing request.
-2. The summary is generated from the redacted text.
-3. The summary is restored locally before it is stored, exactly like assistant text; the next outgoing request redacts it again.
+**Compaction.** Pi hands the hook the same `preparation` object it then summarizes, so the extension redacts that object in place and returns no summary of its own. Pi summarizes the redacted text with the session's own model, which means **one configured model is enough** and Pi keeps routing, credentials, retries and the token budget. The stored summary keeps the replacements, so the session file holds no plaintext summary and the next outgoing request needs no further work. Any failure cancels compaction instead of falling through to Pi summarizing stored plaintext, and reports `COMPACT_FAILED`.
 
-Any failure cancels compaction rather than falling back to Pi's unredacted path, and reports `COMPACT_UNAVAILABLE` (no model or no resolved credentials) or `COMPACT_FAILED`.
+`/compact <instruction>` is the one exception: Pi reads those instructions from its own state, not from the event, so an instruction containing a protected value cannot be redacted. That compaction is cancelled with `COMPACT_INSTRUCTIONS`; run `/compact` without the protected value. Automatic compaction has no instructions and is unaffected.
+
+**The model-runtime guard.** The remaining paths have no event to hook, and `/bug` cannot even be shadowed by an extension command because the interactive editor handles it before extension dispatch. They all reach the provider through the one model runtime the session shares, so `session_start` wraps its call methods: a request that carries Pi's payload hook is passed through untouched (it is already covered, and its caller needs the synchronous lazy stream), and every other call is redacted first. Redaction failure cancels the call. If the runtime cannot be wrapped, startup fails with `GUARD_UNAVAILABLE` and every request is blocked rather than silently unprotected — `/protecter status` shows whether the hookless paths are covered.
+
+The guard wraps `stream` and `streamSimple`, which `complete` and `completeSimple` delegate through, plus `classify` and `generateImages` where Pi has them (they joined the runtime in 0.99; earlier supported releases have no such provider path). A regression asserts this surface against Pi's own classes, so a rename fails the test suite instead of quietly dropping coverage.
 
 Set `compaction` in the local configuration:
 
 | Value | Behaviour |
 | --- | --- |
-| `ask` (default) | Confirm each compaction, then summarize redacted text |
-| `protected` | Summarize redacted text without asking |
+| `ask` (default) | Confirm each compaction, then redact what Pi summarizes |
+| `protected` | Redact without asking |
 | `off` | Always refuse; use `/new` for long sessions |
 
 ```json
@@ -163,31 +172,9 @@ Set `compaction` in the local configuration:
 
 The prompt offers allow once, allow for this session, deny once and deny for this session. A session choice lasts until reload or exit; `compaction` in the configuration is the permanent setting. Dismissing the dialog denies that compaction.
 
-### A dedicated summarization model
+`compaction.provider`, `compaction.model`, `compaction.contextWindow` and `compaction.reserveTokens` selected a separate summarization model before 0.11.0. They are still accepted so an upgrade cannot block a working setup, but they do nothing and are reported at startup; remove them.
 
-Summarizing sends the whole conversation, redacted, to a second destination. Point it at a local or otherwise trusted endpoint:
-
-```json
-{
-  "version": 1,
-  "compaction": {
-    "mode": "protected",
-    "provider": "A6000-vLLM",
-    "model": "Qwen38-27B-FP8",
-    "contextWindow": 262144,
-    "reserveTokens": 16384
-  },
-  "sensitiveWords": []
-}
-```
-
-Both `contextWindow` and `reserveTokens` are inherited and only needed as overrides: the window comes from Pi's model catalogue, and the reserve from Pi's own `compaction.reserveTokens` setting. Set the window for a private endpoint Pi does not know, and the reserve only when the summarization model needs a different margin. A minimal configuration is therefore just `mode`, `provider` and `model`. A configured model that cannot be resolved is an error, reported at startup rather than when the context fills up, and compaction never falls back to the main model, which would send the conversation somewhere you did not choose.
-
-**The threshold follows the summarization model, not the main one.** Pi compacts when the main model's window is nearly full; with a 1M main model that is around 983k tokens, which a 256k summarizer cannot read. The extension therefore compacts earlier, at the summarization model's window minus `reserveTokens`. `/protecter status` shows the target and the effective threshold.
-
-The conversation is redacted before it reaches this model as well, so a trusted endpoint improves reliability, cost and privacy, but the summary still describes replacements rather than the original values.
-
-Two costs are unavoidable: the extra summarization request consumes tokens, and the model reasons about replacements, so the summary can describe protected values inaccurately.
+The model still reasons about replacements, so a summary can describe protected values inaccurately, and the stored summary shows replacements rather than the original values.
 
 Summarized `/tree` navigation takes the same internal Pi path and is protected the same way, using the same setting and prompt. Navigation without a summary sends nothing and is never gated.
 
@@ -257,11 +244,11 @@ Local response and tool-argument restoration
 ## Limitations — read first
 
 - Only rule-matching text is protected, not paraphrases, split characters or arbitrary encodings. Common image/audio/video/file blocks reject the entire request because SPI cannot be reliably inspected; no OCR is provided.
-- Compaction and summarized `/tree` navigation summarize redacted text locally, because Pi builds those requests internally and never routes them through `before_provider_request`. Navigation without summaries sends nothing. See [Context compaction](#context-compaction).
+- Compaction and summarized `/tree` navigation redact what Pi is about to summarize, in place, because Pi builds those requests internally and never routes them through `before_provider_request`; Pi then summarizes the redacted text with the session's own model. Navigation without summaries sends nothing. Pi's other hookless model calls, the `/bug` summary and nested `codemode` or extension calls, are covered by the model-runtime guard. See [Context compaction and every hookless path](#context-compaction-and-every-hookless-path).
 - Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
 - Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
 - Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
-- Hooks do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, `/share`, independent extension SDK/fetch calls or tool networking. The gateway still receives its authentication credentials. Nested model calls outside the agent loop are also uncovered: a `codemode` script's `models.classify()` or `models.generateImages()`, and any `modelRegistry` call another extension makes, are sent without redaction. Pi 0.99.0 ships `codemode`, MCP and tool search as built-in extensions; keep `codemode` out of `defaultTools` and avoid MCP servers where that matters.
+- Model calls are covered; transfers that are not model calls are not. `/bug`'s uploaded bundle, `/share` and `/export` send the stored transcript over their own HTTP paths, which no extension API can intercept, and the transcript holds restored plaintext. Hooks also do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, an extension's own `fetch`, or tool networking, including arguments handed to MCP servers. The gateway still receives its authentication credentials. Treat `/bug`, `/share` and `/export` as plaintext disclosure and review what they contain first.
 - **Load after other payload rewriters and trust every installed extension.** Later handlers can reintroduce originals. Extensions have local permissions, and Pi may continue if this extension fails to load. Check status before entering secrets.
 - Local sessions, terminals, exports and files written by tools may contain plaintext. They are not encrypted or cleaned by this project.
 
@@ -297,7 +284,7 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 pi install npm:pi-information-protecter
 
 # 确有需要时才固定版本；旧版本缺少后续修复。
-pi install npm:pi-information-protecter@0.10.0
+pi install npm:pi-information-protecter@0.11.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -415,24 +402,33 @@ pi update npm:pi-information-protecter
 
 所有通知、提示和诊断仅以**单一语言**呈现，语言按环境变量依次选取：`PI_PROTECTER_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`，最后是运行时区域。`zh*` 选择简体中文，其余回退英文。可设置 `PI_PROTECTER_LANG=en` 或 `PI_PROTECTER_LANG=zh` 覆盖。错误码、阶段和数值细节保持语言无关，便于搜索和反馈。
 
-### 上下文压缩
+### 上下文压缩与所有无钩子路径
 
-Pi 在自己的压缩代码中构造摘要请求并直接发给提供商。该请求不携带 `onPayload` 回调，因此 **`before_provider_request` 根本不会触发**，本扩展无法对其脱敏。直接交给 Pi 生成摘要，等于把存有还原明文的会话内容完整发给提供商。
+只有智能体循环自身的请求携带 Pi 的 `onPayload` 回调，而正是该回调触发 `before_provider_request`。下列请求由 Pi 从零构造，不带该回调，其中大多数甚至没有任何扩展事件：
 
-因此改由扩展自行生成摘要：
+| 路径 | Pi 自身的钩子 | 覆盖方式 |
+| --- | --- | --- |
+| 智能体请求、提示缓存预热 | `onPayload` | `before_provider_request` |
+| 上下文压缩、split-turn 前缀摘要 | `session_before_compact` | 对 Pi 即将摘要的 `preparation` 原地脱敏 |
+| `/tree` 分支摘要 | `session_before_tree` | 对 `entriesToSummarize` 与指令原地脱敏 |
+| `/bug` 报告摘要 | 无 | 模型运行时闸门 |
+| `codemode` 的 `models.classify()`、`models.generateImages()` | 无 | 模型运行时闸门 |
+| 其他扩展发起的嵌套模型调用 | 无 | 模型运行时闸门 |
 
-1. 将 `preparation.messagesToSummarize`、历史摘要和自定义指令，通过与出站请求相同的限时 worker 脱敏。
-2. 基于脱敏后的文本生成摘要。
-3. 摘要在保存前于本地还原，与助手文本一致；下一次出站请求会再次脱敏。
+**压缩。** Pi 交给钩子的 `preparation` 就是它随后用于摘要的同一对象，因此本扩展对该对象原地脱敏，并不返回自己生成的摘要。Pi 用会话自身的模型对脱敏后的文本生成摘要，这意味着**只配一个模型就够了**，且路由、凭证、重试与 token 预算仍由 Pi 负责。保存下来的摘要保留替换值，因此会话文件中不存在明文摘要，下一次出站请求也无需额外处理。任何失败都会取消压缩，而不回退到 Pi 对已存明文生成摘要，并上报 `COMPACT_FAILED`。
 
-任何失败都取消压缩，而不回退到 Pi 未脱敏的路径，并报出 `COMPACT_UNAVAILABLE`（无可用模型或无法获取凭证）或 `COMPACT_FAILED`。
+唯一例外是 `/compact <指令>`：Pi 从自身状态而非事件读取该指令，因此含受保护值的指令无法脱敏。这类压缩会以 `COMPACT_INSTRUCTIONS` 取消；请不带受保护值执行 `/compact`。自动压缩没有指令，不受影响。
+
+**模型运行时闸门。** 其余路径没有可挂的事件，且 `/bug` 连扩展命令都无法遮蔽——交互式编辑器在扩展分发之前就处理了它。它们都经过会话共享的那一个模型运行时发往提供商，因此 `session_start` 会包装其调用方法：携带 Pi 请求钩子的调用原样直通（它已被覆盖，且调用方需要同步的惰性流），其余调用一律先脱敏。脱敏失败即取消该调用。若运行时无法被包装，启动将以 `GUARD_UNAVAILABLE` 失败并拦截所有请求，而不是在无保护的状态下继续——`/protecter status` 会显示无钩子路径是否已覆盖。
+
+闸门包装 `stream` 与 `streamSimple`（`complete`、`completeSimple` 经由二者转发），并在 Pi 具备时一并包装 `classify` 与 `generateImages`（它们在 0.99 加入运行时，更早的受支持版本没有该提供商路径）。新增回归直接对 Pi 自身的类做断言，因此重命名会导致测试失败，而不是静默丢掉覆盖。
 
 在本地配置中设置 `compaction`：
 
 | 取值 | 行为 |
 | --- | --- |
-| `ask`（默认） | 每次压缩先确认，再对脱敏文本生成摘要 |
-| `protected` | 不询问，直接对脱敏文本生成摘要 |
+| `ask`（默认） | 每次压缩先确认，再对 Pi 要摘要的内容脱敏 |
+| `protected` | 不询问，直接脱敏 |
 | `off` | 始终拒绝；长会话请使用 `/new` |
 
 ```json
@@ -445,34 +441,11 @@ Pi 在自己的压缩代码中构造摘要请求并直接发给提供商。该�
 
 弹窗提供四个选项：允许一次、本会话内全部允许、拒绝一次、本会话内全部拒绝。会话级选择在重载或退出前有效；配置中的 `compaction` 才是永久设置。关闭对话框视为拒绝本次压缩。
 
-### 专用摘要模型
+`compaction.provider`、`compaction.model`、`compaction.contextWindow` 与 `compaction.reserveTokens` 在 0.11.0 之前用于选择独立的摘要模型。它们仍被接收，以免升级后拦住可用环境，但已不起任何作用并会在启动时提示，请删除。
 
-生成摘要会把脱敏后的整段对话发往第二个目的地。请指向本地或其他可信端点：
+模型推理的仍是替换值，因此摘要对受保护值的描述可能不准确，保存下来的摘要显示的也是替换值而非原值。
 
-```json
-{
-  "version": 1,
-  "compaction": {
-    "mode": "protected",
-    "provider": "A6000-vLLM",
-    "model": "Qwen38-27B-FP8",
-    "contextWindow": 262144,
-    "reserveTokens": 16384
-  },
-  "sensitiveWords": []
-}
-```
-
-`contextWindow` 与 `reserveTokens` 都会继承，仅在需要覆盖时填写：窗口取自 Pi 的模型目录，预留值取自 Pi 自身的 `compaction.reserveTokens` 设置。Pi 未收录的私有端点需填写窗口；只有当摘要模型需要不同余量时才填预留值。因此最小配置只需 `mode`、`provider`、`model`。配置了却无法解析的模型属于错误，会在启动时报出而非等到上下文写满；压缩也不会回退到主模型——那会把对话发往你未选择的地方。
-
-**阈值跟随摘要模型，而非主模型。** Pi 在主模型窗口将满时压缩，1M 主模型约为 98.3 万 token，而 256k 的摘要模型读不下。因此扩展会提前压缩，阈值为摘要模型窗口减去 `reserveTokens`。`/protecter status` 会显示目标模型与生效阈值。
-
-发往该模型的内容同样先经脱敏，因此可信端点改善的是可靠性、成本与隐私，摘要描述的仍是替换值而非原始值。
-
-有两项代价无法避免：额外的摘要请求会消耗 token；模型推理的是替换值，摘要对受保护值的描述可能不准确。
-
-带摘要的 `/tree` 导航走同一条内部路径，采用相同保护方式，并共用同一设置与弹窗。不生成摘要的导航不发送任何内容，也不会被拦截。
-
+带摘要的 `/tree` 导航走 Pi 同一条内部路径，以相同方式保护，并共用同一设置与弹窗。不带摘要的导航不发送任何内容，也不会被询问。
 ### 多轮一致性与提示词缓存
 
 随机占位符按精确原文首次生成，在同一扩展实例内持续复用，包括本地回复还原后的再次脱敏；新建扫描 worker 不会重置映射。这有助于前缀稳定，但不保证提供商 KV Cache 命中，模型、工具、消息顺序、缓存有效期和路由也有影响。重载、进程重启和会话实例替换会清除映射；不同进程不共享映射，审计时间和请求 ID 不进入模型请求体。
@@ -539,11 +512,11 @@ before_provider_request：最终 JSON 文本扫描
 ## 当前限制——请先阅读
 
 - 仅保护命中规则的文本，不覆盖改写、拆字和任意编码。常见多模态附件因无法可靠审查而拒绝整个请求，不提供 OCR。
-- 压缩与带摘要的 `/tree` 导航均改为在本地对脱敏文本生成摘要，因为 Pi 在内部构造这些请求，不经过 `before_provider_request`。不带摘要的导航不发送任何内容。参见[上下文压缩](#上下文压缩)。
+- 压缩与带摘要的 `/tree` 导航改为对 Pi 即将摘要的内容原地脱敏（Pi 在内部构造这些请求，不经过 `before_provider_request`），随后由 Pi 用会话自身的模型对脱敏文本生成摘要。不带摘要的导航不发送任何内容。Pi 其余无钩子的模型调用（`/bug` 摘要、`codemode` 与其他扩展的嵌套调用）由模型运行时闸门覆盖。参见[上下文压缩与所有无钩子路径](#上下文压缩与所有无钩子路径)。
 - 退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
 - 过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
 - 复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。
-- 钩子不覆盖认证头、API key、网关地址、遥测、分享、扩展独立网络调用和工具联网；网关仍收到其认证凭证。智能体循环之外的嵌套模型调用同样不覆盖：`codemode` 脚本的 `models.classify()`、`models.generateImages()` 以及其他扩展的 `modelRegistry` 调用都不经脖敏即发出。Pi 0.99.0 将 `codemode`、MCP 与工具检索内置为扩展，在意这一点时请不要将 `codemode` 加入 `defaultTools`，并避免使用 MCP 服务器。
+- 模型调用已覆盖，但非模型调用的传输不在覆盖范围：`/bug` 上传的报告包、`/share` 与 `/export` 通过各自的 HTTP 路径发送已保存的会话记录，任何扩展 API 都无法拦截，而会话记录中保存的是已还原的明文。钩子同样不覆盖认证头、API key、网关地址、遥测、扩展自身的 `fetch`，以及工具联网（含交给 MCP 服务器的参数）；网关仍收到其认证凭证。请把 `/bug`、`/share`、`/export` 视为明文披露，使用前先检查其内容。
 - **在其他请求改写扩展之后加载，并只使用可信扩展。** 后续处理器可重新加入原文；扩展有本机权限，插件加载失败时 Pi 可能继续运行，请先检查状态再输入秘密。
 - 本地会话、终端、导出和工具写出的文件可能包含明文，本项目不加密或清理它们。
 

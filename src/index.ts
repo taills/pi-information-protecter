@@ -7,12 +7,9 @@ import {
 import { Protecter } from "./engine.ts";
 import { supportsPi } from "./compat.ts";
 import { blocksConfigAccess } from "./guard.ts";
-import {
-  buildProtectedBranchSummary,
-  buildProtectedSummary,
-  compactionBudget,
-  resolveCompactionModel,
-} from "./compaction.ts";
+import { redactCompaction, redactTree } from "./compaction.ts";
+import { installRuntimeGuard } from "./guard-runtime.ts";
+import { ignoredCompactionKeys } from "./config.ts";
 import {
   failure,
   formatDiagnostic,
@@ -38,6 +35,13 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // Session-scoped compaction decision; the config holds the permanent one.
   // 会话级压缩决定，永久设置保存在配置中。
   let compactChoice: "allow" | "deny" | undefined;
+  // Uninstalls the model-runtime choke point; set while a session is running.
+  // 卸载模型运行时总闸门的函数，会话运行期间有值。
+  let releaseGuard: (() => void) | undefined;
+  const providerOf = (model: unknown) => {
+    const value = (model as { provider?: unknown } | undefined)?.provider;
+    return typeof value === "string" ? value : "unknown";
+  };
   const record = (value: Diagnostic) => {
     const text = formatDiagnostic(value);
     lastBlock = { at: new Date().toISOString(), text };
@@ -48,6 +52,13 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     try {
       if (!compatible) throw failure("UNSUPPORTED_PI");
       await engine.initialize();
+      // Install before reporting health: the paths this guard covers, Pi's own
+      // summarizers and nested model calls, have no event to fail closed in.
+      // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
+      // 没有可供失败拦截的事件。
+      releaseGuard = installRuntimeGuard(ctx.modelRegistry, (model, context) =>
+        engine.redact(context, providerOf(model)),
+      );
       healthy = true;
       const rules = engine.ruleCount;
       ctx.ui.setStatus(
@@ -55,26 +66,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         t("statusBarRules", { rules: count("rules", rules) }),
       );
       if (rules === 0) ctx.ui.notify(t("emptyRules"), "warning");
-      // Resolve the configured summarization model now: discovering it is
-      // wrong once the context is full leaves no way forward.
-      // 立即解析配置的摘要模型：等上下文冒满才发现配错，就无路可走了。
-      const compaction = engine.compaction;
-      if (compaction.provider && compaction.model) {
-        try {
-          resolveCompactionModel(ctx, compaction);
-          ctx.ui.notify(
-            t("compactModelConfigured", {
-              model: `${compaction.model} @ ${compaction.provider}`,
-            }),
-            "info",
-          );
-        } catch (error) {
-          ctx.ui.notify(
-            record(sanitizeError(error, "CONFIG_COMPACT_MODEL").diagnostic),
-            "error",
-          );
-        }
-      }
+      // Report settings that no longer do anything, so a configuration kept
+      // from an older version is not mistaken for one still in effect.
+      // 上报已不生效的设置，避免旧版本留下的配置被误认为仍在生效。
+      const ignored = ignoredCompactionKeys(engine.rawCompaction);
+      if (ignored.length)
+        ctx.ui.notify(
+          t("compactIgnoredKeys", { keys: ignored.join(", ") }),
+          "warning",
+        );
     } catch (error) {
       healthy = false;
       ctx.ui.setStatus("protecter", t("statusBarNotReady"));
@@ -104,7 +104,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       // Always return an empty replacement; abort/notifications are best-effort.
       // 必须返回空替代请求体；终止请求和通知仅作尽力处理。
       try {
-        await ctx.abort();
+        // Returns void in every supported Pi; awaiting it would prove nothing.
+        // 在所有受支持的 Pi 中返回 void，await 不说明任何问题。
+        ctx.abort();
       } catch {
         /* Replacement below remains mandatory. / 仍须返回下方的替代请求体。 */
       }
@@ -173,61 +175,6 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   });
 
   /**
-   * Pi triggers compaction against the main model's window. A smaller
-   * summarization model would then be handed more text than it can read, so
-   * compact earlier, against its window instead.
-   * Pi 按主模型的窗口触发压缩。若摘要模型更小，交给它的文本会超出可读取范围，
-   * 因此改为按它的窗口提前压缩。
-   */
-  let compactingEarly = false;
-  // Pi's effective reserve, seen when it prepares a compaction. Inheriting it
-  // keeps the margin configured in one place instead of two.
-  // Pi 准备压缩时暴露的生效预留值。继承它使余量只需在一处配置。
-  let piReserveTokens: number | undefined;
-  /**
-   * The audit records where data went, so a summary sent to a dedicated model
-   * must not be filed under the conversation's provider.
-   * 审计记录的是数据去向，因此发往专用模型的摘要不得记在对话模型的 provider 下。
-   */
-  const summarizationProvider = (ctx: Pick<ExtensionContext, "model">) =>
-    engine.compaction.provider ?? ctx.model?.provider ?? "unknown";
-  pi.on("agent_settled", (_event, ctx) => {
-    if (!healthy || compactingEarly) return;
-    const settings = engine.compaction;
-    if (settings.mode === "off") return;
-    const budget = compactionBudget(ctx, settings, piReserveTokens);
-    if (!budget) return;
-    const usage = ctx.getContextUsage();
-    const tokens = usage?.tokens;
-    if (typeof tokens !== "number") return;
-    // Only act when Pi would not have compacted yet; otherwise let it run.
-    // 仅在 Pi 尚不会压缩时介入，否则交由它处理。
-    if (tokens <= budget.threshold) return;
-    if (usage && tokens > usage.contextWindow - budget.reserve) return;
-    compactingEarly = true;
-    ctx.ui.notify(
-      t("compactEarly", { tokens: count("tokens", tokens) }),
-      "info",
-    );
-    ctx.compact({
-      onComplete: () => {
-        compactingEarly = false;
-      },
-      onError: () => {
-        compactingEarly = false;
-      },
-    });
-  });
-
-  /**
-   * Pi summarizes internally without passing the payload through
-   * `before_provider_request`, so letting it summarize would send the stored
-   * conversation, which holds restored plaintext, to the provider. Summarize
-   * redacted text here instead, and cancel on any failure.
-   * Pi 在内部生成摘要且不经过 `before_provider_request`，直接交给它会把存有还原明文的
-   * 会话内容发给提供商。此处改为对脱敏文本生成摘要，任何失败均取消。
-   */
-  /**
    * Shared gate for both summarization paths; throws when this one must not run.
    * 两条摘要路径共用的关口，不应执行时抛出。
    */
@@ -267,33 +214,25 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     if (index !== 0 && index !== 1) throw failure("COMPACT_DENIED");
   };
 
+  /**
+   * Pi hands this hook the same `preparation` object it then summarizes, so
+   * redacting it in place is what makes Pi's own summarization request carry
+   * redacted text only. Pi keeps the model, credentials, retries and token
+   * budget, so one configured model is enough. Any failure cancels rather than
+   * falling through to Pi summarizing the stored plaintext.
+   * Pi 交给本钩子的 `preparation` 就是它随后用于摘要的同一对象，因此在此处原地脱敏，
+   * 即可让 Pi 自己的摘要请求只携带脱敏文本。模型、凭证、重试与 token 预算仍由 Pi 负责，
+   * 因此只配一个模型也足够。任何失败都取消，而不回退到 Pi 对已存明文生成摘要。
+   */
   pi.on("session_before_compact", async (event, ctx) => {
-    const reserve = event.preparation.settings?.reserveTokens;
-    if (typeof reserve === "number" && Number.isSafeInteger(reserve))
-      piReserveTokens = reserve;
     try {
       await allowSummarization(ctx, event.signal);
-      ctx.ui.notify(t("compactWorking"), "info");
-      const summary = await buildProtectedSummary(
-        event,
-        ctx,
-        engine,
-        summarizationProvider(ctx),
-        undefined,
-        engine.compaction,
-      );
-      // A degraded summary must be visible, not silently accepted.
-      // 降级的摘要必须可见，不能静默接受。
-      const fallback = (summary.details as { protecter?: Diagnostic })
-        ?.protecter;
-      if (fallback) {
-        ctx.ui.notify(t("compactDegraded"), "warning");
-        ctx.ui.notify(record(fallback), "warning");
-      } else ctx.ui.notify(t("compactDone"), "info");
-      return { compaction: summary };
+      await redactCompaction(event, engine, ctx.model?.provider ?? "unknown");
+      ctx.ui.notify(t("compactRedacted"), "info");
+      // Returning no compaction lets Pi summarize what is now redacted.
+      // 不返回摘要，由 Pi 对已脱敏的内容生成摘要。
+      return undefined;
     } catch (error) {
-      // Cancel rather than fall through to Pi's unredacted summarization.
-      // 取消而不回退到 Pi 未脱敏的摘要流程。
       ctx.ui.notify(
         record(sanitizeError(error, "COMPACT_FAILED").diagnostic),
         "warning",
@@ -302,24 +241,21 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     }
   });
 
-  // Branch summaries take the same internal path, so they are produced here too.
-  // 分支摘要走同一内部路径，因此同样在此处生成。
+  // Branch summaries take the same internal path, so they are redacted the same
+  // way; this event does read its instructions back, so they are returned.
+  // 分支摘要走同一内部路径，因此以同样方式脱敏；该事件会读回指令，故一并返回。
   pi.on("session_before_tree", async (event, ctx) => {
     // Navigation without a summary sends nothing. / 不生成摘要的导航不发送内容。
     if (!event.preparation.userWantsSummary) return undefined;
     try {
       await allowSummarization(ctx, event.signal);
-      ctx.ui.notify(t("compactWorking"), "info");
-      const summary = await buildProtectedBranchSummary(
+      const result = await redactTree(
         event,
-        ctx,
         engine,
-        summarizationProvider(ctx),
-        undefined,
-        engine.compaction,
+        ctx.model?.provider ?? "unknown",
       );
-      ctx.ui.notify(t("compactDone"), "info");
-      return { summary };
+      ctx.ui.notify(t("compactRedacted"), "info");
+      return result;
     } catch (error) {
       ctx.ui.notify(
         record(sanitizeError(error, "COMPACT_FAILED").diagnostic),
@@ -427,22 +363,12 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         rules: count("rules", engine.ruleCount),
         mappings: count("mappings", engine.mappingCount),
       });
-      // Show the compaction target and threshold: a summarization model with a
-      // smaller window changes when compaction happens, which is not otherwise
-      // visible anywhere.
-      // 展示压缩目标与阈值：窗口更小的摘要模型会改变压缩时机，而这一点别处无从得知。
-      const settings = engine.compaction;
-      const budget = compactionBudget(ctx, settings, piReserveTokens);
-      const target =
-        settings.provider && settings.model
-          ? `${settings.model} @ ${settings.provider}`
-          : t("compactMainModel");
+      // Show the compaction mode and whether the runtime guard is installed:
+      // without the guard, Pi's own summarizers would send plaintext.
+      // 展示压缩模式与总闸门是否已安装：缺少闸门时，Pi 自身的摘要器会发送明文。
       const compactLine = `\n${t("statusCompaction", {
-        mode: settings.mode,
-        target,
-        threshold: budget
-          ? count("tokens", budget.threshold)
-          : t("compactNoThreshold"),
+        mode: engine.compactionMode,
+        guard: t(releaseGuard ? "guardInstalled" : "guardMissing"),
       })}`;
       const detail = last
         ? `\n${t("statusLastBlock", { at: lastBlock?.at ?? "" })}\n${last}`
@@ -453,5 +379,12 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       );
     },
   });
-  pi.on("session_shutdown", () => engine.close());
+  pi.on("session_shutdown", () => {
+    // Restore the runtime: the instance outlives this extension runtime, so a
+    // reload must not leave a wrapper bound to a closed engine.
+    // 还原运行时：该实例比本扩展运行时存活更久，重载后不得留下绑定已关闭引擎的包装。
+    releaseGuard?.();
+    releaseGuard = undefined;
+    engine.close();
+  });
 }

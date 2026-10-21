@@ -91,12 +91,43 @@ for (const mode of ["source", "packed"] as const) {
     const loaded = await discoverAndLoadExtensions([entry], dir, dir);
     assert.deepEqual(loaded.errors, []);
     assert.equal(loaded.extensions.length, 1);
+    // The registry must carry a model runtime of Pi's real shape: the guard
+    // installed on it covers the provider calls no extension event can see.
+    // 注册表必须带有与 Pi 真实形态一致的模型运行时：安装在其上的闸门
+    // 覆盖了任何扩展事件都看不到的提供商调用。
+    const sent: { method: string; context: unknown }[] = [];
+    const lazy =
+      (method: string) =>
+      (_model: unknown, context: unknown, _options?: unknown) => {
+        sent.push({ method, context });
+        return { result: async () => ({ method }) };
+      };
+    const modelRuntime = {
+      stream: lazy("stream"),
+      streamSimple: lazy("streamSimple"),
+      classify: async (
+        _model: unknown,
+        context: unknown,
+        _options?: unknown,
+      ) => {
+        sent.push({ method: "classify", context });
+        return {};
+      },
+      generateImages: async (
+        _model: unknown,
+        context: unknown,
+        _options?: unknown,
+      ) => {
+        sent.push({ method: "generateImages", context });
+        return {};
+      },
+    };
     const runner = new ExtensionRunner(
       loaded.extensions,
       loaded.runtime,
       dir,
       SessionManager.inMemory(dir),
-      {} as ModelRegistry,
+      { runtime: modelRuntime } as unknown as ModelRegistry,
     );
     // Stub only the host UI/agent actions, not the extension, loader or middleware runner.
     // 仅模拟宿主界面和智能体动作，不模拟扩展、加载器或中间件执行器。
@@ -215,6 +246,60 @@ for (const mode of ["source", "packed"] as const) {
     assert.match(token, /^[a-z]{4}-[a-z]{7}-[a-z]{8}$/);
     assert.equal(token.length, "fake-private-password".length);
     assert.ok(!JSON.stringify(outgoing).includes("fake-private-password"));
+
+    // Pi's own summarizers, /bug and nested model calls reach the provider
+    // through the model runtime with no payload hook and no extension event.
+    // Pi 自身的摘要器、/bug 与嵌套模型调用经模型运行时发往提供商，
+    // 既无请求钩子也无扩展事件。
+    const summarizerContext = {
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "fake-private-password" }],
+        },
+      ],
+    };
+    // Without a payload hook the guard redacts first, so the lazy stream
+    // arrives as a promise instead of synchronously.
+    // 无请求钩子时闸门会先脱敏，因此惰性流以 promise 而非同步形式返回。
+    const hooklessStream = modelRuntime.streamSimple as unknown as (
+      model: unknown,
+      context: unknown,
+      options?: unknown,
+    ) => Promise<{ result: () => Promise<unknown> }>;
+    await (
+      await hooklessStream({ provider: "demo" }, summarizerContext, {
+        apiKey: "k",
+      })
+    ).result();
+    await modelRuntime.classify({ provider: "demo" }, summarizerContext, {});
+    assert.equal(sent.length, 2);
+    for (const call of sent) {
+      assert.ok(
+        !JSON.stringify(call.context).includes("fake-private-password"),
+        `${call.method} must not carry plaintext`,
+      );
+      assert.ok(JSON.stringify(call.context).includes(token));
+    }
+    // The original stays untouched locally; only what leaves is redacted.
+    // 本地原始对象不变，只有外发内容被脱敏。
+    assert.equal(
+      summarizerContext.messages[0].content[0].text,
+      "fake-private-password",
+    );
+    // Agent-loop requests carry Pi's payload hook, which this extension already
+    // covers, and their callers need the synchronous lazy stream.
+    // 智能体循环请求携带 Pi 的请求钩子（已被本扩展覆盖），且调用方需要同步惰性流。
+    const warmed = modelRuntime.streamSimple(
+      { provider: "demo" },
+      summarizerContext,
+      { onPayload: async (payload: unknown) => payload },
+    );
+    assert.equal(typeof warmed.result, "function");
+    assert.equal(sent.length, 3);
+    assert.equal(sent[2].context, summarizerContext);
+    sent.length = 0;
+
     const fixed = (await runner.emitBeforeProviderRequest({
       text: "Apple Inc.",
     })) as { text: string };

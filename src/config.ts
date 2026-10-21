@@ -18,43 +18,44 @@ export type Rule =
 /**
  * How to handle context compaction. Pi builds the summarization request
  * internally and never routes it through `before_provider_request`, so the
- * only safe options are to summarize redacted text ourselves or to refuse.
+ * only safe options are to redact what Pi is about to summarize, or to refuse.
  * 上下文压缩的处理方式。Pi 在内部构造摘要请求，不经过 `before_provider_request`，
- * 因此只有两种安全选择：由本扩展对脱敏后的文本生成摘要，或直接拒绝。
+ * 因此只有两种安全选择：对 Pi 即将摘要的内容先脱敏，或直接拒绝。
  *
- * - `ask`: confirm each compaction, then summarize redacted text. / 每次确认后，对脱敏文本生成摘要。
- * - `protected`: summarize redacted text without asking. / 不询问，直接对脱敏文本生成摘要。
+ * Pi summarizes with the session's own model, so a single configured model is
+ * enough and nothing here selects one.
+ * Pi 使用会话自身的模型生成摘要，因此只配一个模型也足够，此处不再选择模型。
+ *
+ * - `ask`: confirm each compaction, then redact what Pi summarizes. / 每次确认后，对 Pi 要摘要的内容脱敏。
+ * - `protected`: redact without asking. / 不询问，直接脱敏。
  * - `off`: always refuse. / 始终拒绝。
  */
 export type CompactionMode = "ask" | "protected" | "off";
 export const COMPACTION_MODES: CompactionMode[] = ["ask", "protected", "off"];
 
-/**
- * A dedicated summarization model. The conversation is redacted before it is
- * sent, but it is still an entire conversation leaving for a second
- * destination, so prefer a local or otherwise trusted endpoint.
- * 专用的摘要模型。发送前会先脱敏，但毕竟是整段对话发往第二个目的地，应优先使用
- * 本地或可信端点。
- *
- * A smaller summarization model must also drive the compaction threshold:
- * waiting for the main model's window would hand it more text than it can read.
- * 较小的摘要模型还必须决定压缩阈值：若等到主模型的窗口才触发，交给它的文本会超出
- * 其可读取范围。
- */
 export interface CompactionSettings {
   mode: CompactionMode;
-  provider?: string;
-  model?: string;
-  /**
-   * Both are inherited and only needed as overrides: the window comes from
-   * Pi's model catalogue, and the reserve from Pi's own compaction settings.
-   * Set the window for a private endpoint Pi does not know, and the reserve
-   * only when the summarization model needs a different margin.
-   * 两者均会继承，仅在需要覆盖时填写：窗口来自 Pi 的模型目录，预留值来自 Pi 自身的
-   * 压缩设置。Pi 未收录的私有端点需填窗口，摘要模型需要不同余量时才填预留值。
-   */
-  contextWindow?: number;
-  reserveTokens?: number;
+}
+
+/**
+ * Accepted but ignored since 0.11.0, when summarization moved back to Pi and
+ * the session's own model. Rejecting them would fail the whole configuration
+ * closed and block every request of an otherwise working setup, so they are
+ * reported at startup instead.
+ * 自 0.11.0 起只接收、不生效：摘要已交回 Pi 及会话自身的模型。直接拒绝会使整份配置
+ * 失败并拦住原本可用环境的所有请求，因此改为在启动时上报。
+ */
+export const IGNORED_COMPACTION_KEYS = [
+  "provider",
+  "model",
+  "contextWindow",
+  "reserveTokens",
+] as const;
+
+/** Which ignored keys a configuration still carries. / 配置中仍存在哪些已忽略项。 */
+export function ignoredCompactionKeys(value: Config["compaction"]): string[] {
+  if (!value || typeof value !== "object") return [];
+  return IGNORED_COMPACTION_KEYS.filter((key) => Object.hasOwn(value, key));
 }
 
 export interface Config {
@@ -80,49 +81,23 @@ function validateCompaction(value: unknown): void {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw failure("CONFIG_COMPACTION");
   const settings = value as Record<string, unknown>;
-  const allowed = [
-    "mode",
-    "provider",
-    "model",
-    "contextWindow",
-    "reserveTokens",
-  ];
-  if (Object.keys(settings).some((key) => !allowed.includes(key)))
+  const allowed = ["mode", ...IGNORED_COMPACTION_KEYS];
+  if (Object.keys(settings).some((key) => !allowed.includes(key as never)))
     throw failure("CONFIG_COMPACTION");
   if (
     settings.mode !== undefined &&
     !COMPACTION_MODES.includes(settings.mode as CompactionMode)
   )
     throw failure("CONFIG_COMPACTION");
-  for (const key of ["provider", "model"] as const) {
+  // The ignored keys are only checked for a plausible type: they no longer
+  // select anything, so a stale value must not decide whether requests flow.
+  // 已忽略的项只做类型粗检：它们不再决定任何行为，陈旧取值不应左右请求能否通过。
+  for (const key of IGNORED_COMPACTION_KEYS) {
     const entry = settings[key];
     if (entry === undefined) continue;
-    if (typeof entry !== "string" || !entry.trim() || entry.length > 200)
+    if (typeof entry !== "string" && typeof entry !== "number")
       throw failure("CONFIG_COMPACTION");
   }
-  // A provider without a model, or the reverse, cannot resolve to anything.
-  // 只写 provider 或只写 model 都无法解析出模型。
-  if (
-    (settings.provider === undefined) !== (settings.model === undefined)
-  )
-    throw failure("CONFIG_COMPACT_MODEL");
-  for (const key of ["contextWindow", "reserveTokens"] as const) {
-    const entry = settings[key];
-    if (entry === undefined) continue;
-    if (
-      typeof entry !== "number" ||
-      !Number.isSafeInteger(entry) ||
-      entry <= 0 ||
-      entry > 100_000_000
-    )
-      throw failure("CONFIG_COMPACTION");
-  }
-  // Reserving the whole window would leave no room for the conversation.
-  // 预留整个窗口将不给对话留下空间。
-  const window = settings.contextWindow as number | undefined;
-  const reserve = settings.reserveTokens as number | undefined;
-  if (window !== undefined && reserve !== undefined && reserve >= window)
-    throw failure("CONFIG_COMPACTION");
 }
 
 /** Normalize either accepted form into one shape. / 将两种写法归一为同一结构。 */
@@ -131,7 +106,9 @@ export function compactionSettings(
 ): CompactionSettings {
   if (value === undefined) return { mode: DEFAULT_COMPACTION };
   if (typeof value === "string") return { mode: value };
-  return { ...value, mode: value.mode ?? DEFAULT_COMPACTION };
+  // Return only the mode: an ignored key must not travel on as if it applied.
+  // 仅返回 mode：已忽略的项不应继续传递，以免看似仍在生效。
+  return { mode: value.mode ?? DEFAULT_COMPACTION };
 }
 
 export function parseConfig(raw: string): Config {

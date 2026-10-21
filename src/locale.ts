@@ -19,6 +19,10 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Unsupported Pi version",
     `Use Pi ${SUPPORTED_PI}`,
   ],
+  GUARD_UNAVAILABLE: [
+    "Cannot cover the model calls that have no extension hook",
+    "This Pi build exposes no model runtime to wrap; use Pi " + SUPPORTED_PI + " or set a trusted Pi version",
+  ],
   MACHINE_ID: [
     "Machine identifier unavailable",
     "Check local OS machine-ID access; no random fallback is used",
@@ -175,25 +179,17 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Compaction refused",
     "Allow it when asked, or set \"compaction\" to \"protected\" in the local config",
   ],
-  COMPACT_UNAVAILABLE: [
-    "No model or credentials available to summarize",
-    "Select a model and sign in to its provider, then retry",
-  ],
   COMPACT_FAILED: [
-    "Could not summarize the redacted conversation",
+    "Could not redact what Pi is about to summarize",
     "Retry; if it persists, set \"compaction\" to \"off\" and use /new",
   ],
-  COMPACT_EMPTY: [
-    "The model returned an empty summary",
-    "A local summary was used instead; no action is required",
+  COMPACT_INSTRUCTIONS: [
+    "The compaction instruction contains a protected value",
+    "Pi reads that instruction from its own state, so it cannot be redacted: run /compact without it",
   ],
   CONFIG_COMPACTION: [
     "Invalid compaction setting",
-    'Use "ask", "protected" or "off", or an object with mode, provider, model, contextWindow and reserveTokens',
-  ],
-  CONFIG_COMPACT_MODEL: [
-    "The compaction model cannot be resolved",
-    "Set both provider and model, check their spelling, and sign in to that provider",
+    'Use "ask", "protected" or "off", or an object with mode',
   ],
   AUDIT_BATCH_LIMIT: [
     "Audit batch exceeds the size limit",
@@ -225,6 +221,10 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
   INTERNAL: ["未预期的本地错误", "重载并检查安装包完整性"],
   NOT_READY: ["防护尚未初始化", "查看初始化错误，修复后重载"],
   UNSUPPORTED_PI: ["Pi 版本不受支持", `请使用 Pi ${SUPPORTED_PI}`],
+  GUARD_UNAVAILABLE: [
+    "无法覆盖没有扩展钩子的模型调用",
+    "该 Pi 构建未暴露可包装的模型运行时：请使用 Pi " + SUPPORTED_PI + " 或改用可信的 Pi 版本",
+  ],
   MACHINE_ID: ["无法获取机器标识", "检查系统机器标识访问权限，不使用随机回退"],
   CONFIG_JSON: ["配置 JSON 无效", "本地修复 JSON 语法后重载"],
   CONFIG_SCHEMA: [
@@ -318,25 +318,17 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
     "压缩被拒绝",
     "询问时选择允许，或在本地配置中将 \"compaction\" 设为 \"protected\"",
   ],
-  COMPACT_UNAVAILABLE: [
-    "没有可用于生成摘要的模型或凭证",
-    "选择模型并登录对应提供商后重试",
-  ],
   COMPACT_FAILED: [
-    "无法对脱敏后的会话生成摘要",
+    "无法对 Pi 即将摘要的内容脱敏",
     "请重试；若持续失败，将 \"compaction\" 设为 \"off\" 并使用 /new",
   ],
-  COMPACT_EMPTY: [
-    "模型返回了空摘要",
-    "已改用本地摘要，无需处理",
+  COMPACT_INSTRUCTIONS: [
+    "压缩指令中包含受保护值",
+    "Pi 从自身状态读取该指令，无法脱敏：请不带该指令执行 /compact",
   ],
   CONFIG_COMPACTION: [
     "compaction 配置值无效",
-    '请使用 "ask"、"protected"、"off"，或含 mode、provider、model、contextWindow、reserveTokens 的对象',
-  ],
-  CONFIG_COMPACT_MODEL: [
-    "无法解析压缩模型",
-    "请同时填写 provider 和 model、核对拼写，并登录该提供商",
+    '请使用 "ask"、"protected"、"off"，或含 mode 的对象',
   ],
   AUDIT_BATCH_LIMIT: ["审计批次超过上限", "减少单个请求的命中内容"],
   AUDIT_FULL: ["审计日志将超过上限", "检查记录后清空日志或本地归档"],
@@ -383,23 +375,19 @@ const UI_EN = {
     "SPI Protecter blocked tool access to the protected configuration or audit log; edit it locally.",
   compactAskTitle: "Compact this conversation?",
   compactAskBody:
-    "Pi builds the summarization request internally and never routes it through this extension's redaction, so allowing Pi to summarize directly would send the conversation, including protected values, as plaintext.\n\nAllowing here does NOT do that: the text is redacted first, the summary is generated from the redacted text, and the summary is restored locally afterwards. The extra request costs tokens, and the model reasons about replacements, so the summary may describe protected values inaccurately.\n\nThis request will not be blocked if you allow it.",
+    "Pi builds the summarization request internally and never routes it through this extension's redaction, so letting Pi summarize as-is would send the conversation, including protected values, as plaintext.\n\nAllowing here does NOT do that: the conversation Pi is about to summarize is redacted first, and Pi then summarizes the redacted text with the current model. No extra model is needed. The stored summary keeps the replacements, and the model reasons about replacements, so it may describe protected values inaccurately.\n\nThis request will not be blocked if you allow it.",
   compactAllowOnce: "Allow once",
   compactAllowAlways: "Allow for this session",
   compactDenyOnce: "Deny once",
   compactDenyAlways: "Deny for this session",
-  compactWorking: "SPI Protecter: summarizing redacted text\u2026",
-  compactDone:
-    "SPI Protecter: compaction summary generated from redacted text.",
-  compactDegraded:
-    "SPI Protecter: the model produced no usable summary, so a local one was used. It lists facts rather than interpreting them, so earlier context is less detailed.",
-  compactModelConfigured:
-    "SPI Protecter: compaction will summarize with {model}. It receives the whole conversation, redacted, so prefer a local or otherwise trusted endpoint.",
-  compactEarly:
-    "SPI Protecter: compacting early at {tokens} so the summarization model can still read the conversation.",
-  compactMainModel: "the current model",
-  compactNoThreshold: "Pi's own threshold",
-  statusCompaction: "Compaction: {mode} via {target}; compacts above {threshold}.",
+  compactRedacted:
+    "SPI Protecter: redacted what Pi is about to summarize; Pi now summarizes with the current model. The stored summary keeps the replacements.",
+  compactIgnoredKeys:
+    "SPI Protecter: the compaction settings {keys} no longer do anything and are ignored. Pi summarizes with the session's own model; remove them from the local config.",
+  guardInstalled: "covered",
+  guardMissing: "NOT covered",
+  statusCompaction:
+    "Compaction: {mode}; Pi summarizes with the current model. Hookless model calls: {guard}.",
   compactAlwaysNotice:
     "SPI Protecter: compaction allowed for this session. Set \"compaction\" in the local config to make it permanent.",
   compactDenyNotice:
@@ -411,22 +399,18 @@ type UiKey = keyof typeof UI_EN;
 const UI_ZH: Record<UiKey, string> = {
   compactAskTitle: "是否压缩当前会话？",
   compactAskBody:
-    "Pi 在内部构造摘要请求，不经过本扩展的脱敏环节，因此直接让 Pi 生成摘要会将会话内容（包括受保护的值）以明文发送。\n\n在此处允许**不会**这样做：先对文本脱敏，再用脱敏后的内容生成摘要，最后在本地还原。这次额外请求会消耗 token；且模型推理的是替换值，摘要对受保护值的描述可能不准确。\n\n若选择允许，本次请求不会被拦截。",
+    "Pi 在内部构造摘要请求，不经过本扩展的脱敏环节，因此原样让 Pi 生成摘要会将会话内容（包括受保护的值）以明文发送。\n\n在此处允许**不会**这样做：先对 Pi 即将摘要的内容脱敏，再由 Pi 用当前模型对脱敏后的内容生成摘要，无需额外模型。保存下来的摘要保留替换值；且模型推理的是替换值，对受保护值的描述可能不准确。\n\n若选择允许，本次请求不会被拦截。",
   compactAllowOnce: "允许一次",
   compactAllowAlways: "本会话内全部允许",
   compactDenyOnce: "拒绝一次",
   compactDenyAlways: "本会话内全部拒绝",
-  compactWorking: "SPI Protecter：正在对脱敏内容生成摘要…",
-  compactDone: "SPI Protecter：已基于脱敏内容生成压缩摘要。",
-  compactDegraded:
-    "SPI Protecter：模型未产出可用摘要，已改用本地摘要。它只罗列事实而不做理解，因此早期上下文会更粗略。",
-  compactModelConfigured:
-    "SPI Protecter：压缩将使用 {model} 生成摘要。它会收到脱敏后的整段对话，请优先使用本地或可信端点。",
-  compactEarly:
-    "SPI Protecter：已在 {tokens} 提前压缩，以便摘要模型仍能读取该对话。",
-  compactMainModel: "当前模型",
-  compactNoThreshold: "Pi 自身阈值",
-  statusCompaction: "压缩：{mode}，经由 {target}；超过 {threshold} 时压缩。",
+  compactRedacted:
+    "SPI Protecter：已对 Pi 即将摘要的内容脱敏，现由 Pi 用当前模型生成摘要。保存下来的摘要保留替换值。",
+  compactIgnoredKeys:
+    "SPI Protecter：compaction 配置项 {keys} 已不再生效并被忽略。Pi 使用会话自身的模型生成摘要，请从本地配置中删除它们。",
+  guardInstalled: "已覆盖",
+  guardMissing: "未覆盖",
+  statusCompaction: "压缩：{mode}；由 Pi 用当前模型生成摘要。无钩子的模型调用：{guard}。",
   compactAlwaysNotice:
     "SPI Protecter：本会话内允许压缩。如需永久生效，请在本地配置中设置 \"compaction\"。",
   compactDenyNotice:

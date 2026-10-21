@@ -1,5 +1,34 @@
 # Changelog / 更新日志
 
+## 0.11.0 — Pi summarizes again, and every hookless path is covered / 摘要交回 Pi，并覆盖所有无钩子路径
+
+### Changed / 变更
+
+- Stop summarizing in this extension. Pi hands `session_before_compact` the same `preparation` object it then summarizes, so what Pi is about to summarize is now redacted in place and Pi summarizes it with the session's own model. A single configured model is therefore enough, and routing, credentials, retries and the token budget stay with Pi. Deleted with it: the second model's credential resolution, the stream-function compatibility shim, the local degraded summary and the early-compaction threshold — the most failure-prone code in the extension.
+  本扩展不再生成摘要。Pi 交给 `session_before_compact` 的 `preparation` 正是它随后用于摘要的同一对象，因此现在对 Pi 即将摘要的内容原地脖敏，再由 Pi 用会话自身的模型生成摘要。因此只配一个模型即可，且路由、凭证、重试与 token 预算仍由 Pi 负责。同时删除：第二个模型的凭证解析、流函数兼容层、本地降级摘要与提前压缩阈值——这些是本扩展最易出错的代码。
+- Keep the stored compaction summary redacted instead of restoring it. The session file now holds no plaintext summary, which also keeps it out of `/bug`, `/share` and `/export`. The summary is displayed with its replacements.
+  保存的压缩摘要不再还原。会话文件中不再存在明文摘要，也因此不会进入 `/bug`、`/share` 与 `/export`。摘要以替换值展示。
+- Accept but ignore `compaction.provider`, `compaction.model`, `compaction.contextWindow` and `compaction.reserveTokens`, and report them at startup. Rejecting them would fail the whole configuration closed and block every request of a setup that worked before the upgrade.
+  `compaction.provider`、`compaction.model`、`compaction.contextWindow` 与 `compaction.reserveTokens` 仍被接收但不生效，并在启动时提示。直接拒绍会使整份配置失败，并拦住升级前原本可用环境的所有请求。
+
+### Added / 新增
+
+- Cover every provider call that has no extension hook. Only the agent loop's requests carry Pi's `onPayload` callback; the `/bug` report summary has no event at all and its command cannot be shadowed, because the interactive editor handles `/bug` before extension dispatch, and nested calls from `codemode` scripts (`models.classify()`, `models.generateImages()`) or other extensions are equally invisible. `session_start` now wraps the call methods of the one model runtime the session shares: requests carrying the payload hook pass through untouched, keeping the synchronous lazy stream the prompt-cache warmer needs, and every other call is redacted first.
+  覆盖所有没有扩展钩子的提供商调用。只有智能体循环的请求携带 Pi 的 `onPayload` 回调；`/bug` 报告摘要没有任何事件，其命令也无法被遮蔽（交互式编辑器在扩展分发之前就处理了 `/bug`），`codemode` 脚本（`models.classify()`、`models.generateImages()`）与其他扩展的嵌套调用同样不可见。`session_start` 现在包装会话共享的那一个模型运行时的调用方法：携带请求钩子的请求原样直通，以保留提示缓存预热所需的同步惰性流，其余调用一律先脖敏。
+- Wrap the classifier and image-model calls only where Pi has them: they joined the model runtime in 0.99, and earlier supported releases have no such provider path, so coverage stays complete there without them. `complete` and `completeSimple` delegate through `stream` and `streamSimple` in every supported release, so wrapping those two covers them too. A regression asserts this surface against Pi's own classes, so a rename fails the suite instead of quietly dropping coverage. Verified by running the full suite against 0.84.4, 0.85.1, 0.86.1, 0.87.1, 0.99.2, 1.2.0 and 1.3.0.
+  分类与图像模型调用仅在 Pi 具备时包装：它们在 0.99 加入模型运行时，更早的受支持版本没有该提供商路径，因此没有它们也仍然覆盖完整。在所有受支持版本中，`complete` 与 `completeSimple` 都经 `stream`、`streamSimple` 转发，因此包装这两个即可连带覆盖。新增回归直接对 Pi 自身的类做断言，重命会导致测试失败而不是静默丢掉覆盖。已在 0.84.4、0.85.1、0.86.1、0.87.1、0.99.2、1.2.0 与 1.3.0 上运行完整测试验证。
+- Add `GUARD_UNAVAILABLE`: the guard wraps methods internal to Pi, so its target is verified at startup and a runtime that cannot be wrapped blocks every request instead of running unprotected. `/protecter status` reports whether the hookless paths are covered.
+  新增 `GUARD_UNAVAILABLE`：该闸门包装的是 Pi 内部方法，因此在启动时校验其目标；无法包装时拦住所有请求，而不在无保护状态下运行。`/protecter status` 会显示无钩子路径是否已覆盖。
+- Add `COMPACT_INSTRUCTIONS`: `/compact <instruction>` is cancelled when the instruction holds a protected value, because Pi reads those instructions from its own state rather than from the event, so a redacted copy would be ignored. `/tree` does read its instructions back, so there they are returned redacted. Automatic compaction has no instructions and is unaffected.
+  新增 `COMPACT_INSTRUCTIONS`：当 `/compact <指令>` 的指令含受保护值时取消，因为 Pi 从自身状态而非事件读取指令，脖敏副本不会被采用。`/tree` 会读回指令，因此在那里返回脖敏后的指令。自动压缩没有指令，不受影响。
+- Document what still cannot be intercepted: `/bug`'s uploaded bundle, `/share` and `/export` send the stored transcript over their own HTTP paths, which no extension API can reach. Only the `/bug` summarization request is covered.
+  记录仍无法拦截的部分：`/bug` 上传的报告包、`/share` 与 `/export` 通过各自的 HTTP 路径发送已保存的会话记录，任何扩展 API 都无法触及。仅 `/bug` 的摘要请求在覆盖范围内。
+
+### Removed / 删除
+
+- Remove `COMPACT_UNAVAILABLE`, `COMPACT_EMPTY` and `CONFIG_COMPACT_MODEL`: no credential resolution, empty-summary check or model lookup happens in this extension any more.
+  删除 `COMPACT_UNAVAILABLE`、`COMPACT_EMPTY` 与 `CONFIG_COMPACT_MODEL`：本扩展不再做凭证解析、空摘要判定或模型查找。
+
 ## 0.10.0 — Pi 1.x compatibility / 兼容 Pi 1.x
 
 ### Added / 新增
