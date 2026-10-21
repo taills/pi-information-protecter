@@ -10,14 +10,14 @@ A Pi extension that inspects outgoing LLM request bodies locally, replaces confi
 
 ## Installation
 
-Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x or 0.85.1–0.87.x**. Every accepted release was verified by running the full suite, including the real loader and worker integration tests. 0.83.0 and earlier lack `registerMarkdownTransformer`, and 0.85.0 imports `@earendil-works/pi-server`, which no Pi release declares, so both fail to load. Legacy `@mariozechner/*` releases are not supported.
+Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x, 0.85.1–0.87.x, 0.99.x or 1.2.0–1.3.x**. Every accepted release was verified by running the full suite, including the real loader and worker integration tests. 0.83.0 and earlier lack `registerMarkdownTransformer`; 0.85.0 imports `@earendil-works/pi-server`, which no Pi release declares; and 1.0.x and 1.1.0 resolve `@earendil-works/pi-codemode` to a version that no longer exports `MCP_TYPESCRIPT_PREAMBLE`, so all of them fail to load. Legacy `@mariozechner/*` releases are not supported.
 
 ```bash
 # Install the latest npm release.
 pi install npm:pi-information-protecter
 
 # Pin a version only when you have a reason to; older releases miss fixes.
-pi install npm:pi-information-protecter@0.7.0
+pi install npm:pi-information-protecter@0.10.0
 
 # Alternatively, build and install from this repository without copying it.
 npm ci
@@ -261,7 +261,7 @@ Local response and tool-argument restoration
 - Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
 - Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
 - Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
-- Hooks do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, `/share`, independent extension SDK/fetch calls or tool networking. The gateway still receives its authentication credentials.
+- Hooks do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, `/share`, independent extension SDK/fetch calls or tool networking. The gateway still receives its authentication credentials. Nested model calls outside the agent loop are also uncovered: a `codemode` script's `models.classify()` or `models.generateImages()`, and any `modelRegistry` call another extension makes, are sent without redaction. Pi 0.99.0 ships `codemode`, MCP and tool search as built-in extensions; keep `codemode` out of `defaultTools` and avoid MCP servers where that matters.
 - **Load after other payload rewriters and trust every installed extension.** Later handlers can reintroduce originals. Extensions have local permissions, and Pi may continue if this extension fails to load. Check status before entering secrets.
 - Local sessions, terminals, exports and files written by tools may contain plaintext. They are not encrypted or cleaned by this project.
 
@@ -290,14 +290,14 @@ API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.
 
 ## 安装
 
-要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.84.0–0.84.x 或 0.85.1–0.87.x**。每个受支持版本都经过完整测试验证（含真实加载器与 worker 集成测试）。0.83.0 及更早缺少 `registerMarkdownTransformer`，0.85.0 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`，两者均无法加载。不支持旧 `@mariozechner/*` 版本。
+要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.84.0–0.84.x、0.85.1–0.87.x、0.99.x 或 1.2.0–1.3.x**。每个受支持版本都经过完整测试验证（含真实加载器与 worker 集成测试）。0.83.0 及更早缺少 `registerMarkdownTransformer`；0.85.0 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`；1.0.x 与 1.1.0 将 `@earendil-works/pi-codemode` 解析到已不再导出 `MCP_TYPESCRIPT_PREAMBLE` 的版本，三者均无法加载。不支持旧 `@mariozechner/*` 版本。
 
 ```bash
 # 安装最新 npm 版本。
 pi install npm:pi-information-protecter
 
 # 确有需要时才固定版本；旧版本缺少后续修复。
-pi install npm:pi-information-protecter@0.7.0
+pi install npm:pi-information-protecter@0.10.0
 
 # 或在本仓库构建后本地安装，不复制仓库。
 npm ci
@@ -543,7 +543,7 @@ before_provider_request：最终 JSON 文本扫描
 - 退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
 - 过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
 - 复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。
-- 钩子不覆盖认证头、API key、网关地址、遥测、分享、扩展独立网络调用和工具联网；网关仍收到其认证凭证。
+- 钩子不覆盖认证头、API key、网关地址、遥测、分享、扩展独立网络调用和工具联网；网关仍收到其认证凭证。智能体循环之外的嵌套模型调用同样不覆盖：`codemode` 脚本的 `models.classify()`、`models.generateImages()` 以及其他扩展的 `modelRegistry` 调用都不经脖敏即发出。Pi 0.99.0 将 `codemode`、MCP 与工具检索内置为扩展，在意这一点时请不要将 `codemode` 加入 `defaultTools`，并避免使用 MCP 服务器。
 - **在其他请求改写扩展之后加载，并只使用可信扩展。** 后续处理器可重新加入原文；扩展有本机权限，插件加载失败时 Pi 可能继续运行，请先检查状态再输入秘密。
 - 本地会话、终端、导出和工具写出的文件可能包含明文，本项目不加密或清理它们。
 

@@ -1,5 +1,21 @@
 # Changelog / 更新日志
 
+## 0.10.0 — Pi 1.x compatibility / 兼容 Pi 1.x
+
+### Added / 新增
+
+- Accept Pi 0.99.x and 1.2.0–1.3.x, established by running the full suite, including the real loader and worker integration tests, against 0.87.1, 0.99.2, 1.2.0 and 1.3.0. The runtime gate refused every 0.88+ version, so on current Pi releases the extension failed every request closed with `UNSUPPORTED_PI` while the status bar still showed it as loaded.
+  接收 Pi 0.99.x 与 1.2.0–1.3.x，依据是在 0.87.1、0.99.2、1.2.0 和 1.3.0 上运行完整测试（含真实加载器与 worker 集成测试）。之前运行时门禁拒绍所有 0.88+ 版本，因此在当前 Pi 上每个请求都以 `UNSUPPORTED_PI` 被拦，状态栏却仍显示已加载。
+- Document that nested model calls outside the agent loop are not redacted: a `codemode` script's `models.classify()` or `models.generateImages()`, and any `modelRegistry` call another extension makes, carry no `onPayload` callback. Pi 0.99.0 added `codemode`, MCP and tool search as built-in extensions, so this boundary is new.
+  记录智能体循环之外的嵌套模型调用不会脖敏：`codemode` 脚本的 `models.classify()`、`models.generateImages()` 以及其他扩展的 `modelRegistry` 调用都不携带 `onPayload` 回调。Pi 0.99.0 新增了内置的 `codemode`、MCP 与工具检索扩展，因此这是新的边界。
+
+### Changed / 变更
+
+- Refuse Pi 1.0.x and 1.1.0: both depend on `@earendil-works/pi-codemode: ^1.0.4`, which now resolves to 1.3.0, whose missing `MCP_TYPESCRIPT_PREAMBLE` export makes Pi itself throw while loading. This mirrors the existing 0.85.0 exclusion — Pi's own unresolvable import, not an extension defect.
+  拒绝 Pi 1.0.x 与 1.1.0：二者依赖 `@earendil-works/pi-codemode: ^1.0.4`，它如今解析到 1.3.0，而该版本已不导出 `MCP_TYPESCRIPT_PREAMBLE`，导致 Pi 自身在加载时抛错。这与现有的 0.85.0 排除同理：问题出在 Pi 自身无法解析的引用，而非扩展缺陷。
+- Build and verify against Pi 1.3.0 and widen the declared peer range to match the runtime gate exactly.
+  构建与验证基线改为 Pi 1.3.0，并将声明的 peer 范围与运行时门禁保持完全一致。
+
 ## 0.9.0 — A dedicated summarization model / 专用摘要模型
 
 ### Added / 新增

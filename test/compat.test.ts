@@ -16,6 +16,11 @@ test("only verified Pi releases are accepted / 仅接受经验证的 Pi 版本",
     "0.86.0",
     "0.86.1",
     "0.87.0",
+    "0.87.1",
+    "0.99.0",
+    "0.99.2",
+    "1.2.0",
+    "1.3.0",
   ];
   for (const version of accepted)
     assert.equal(supportsPi(version), true, `should accept ${version}`);
@@ -30,7 +35,13 @@ test("only verified Pi releases are accepted / 仅接受经验证的 Pi 版本",
     "0.85.0",
     // Unverified future lines. / 未经验证的后续版本。
     "0.88.0",
+    "0.98.0",
+    // Pi resolves a codemode export that no longer exists. / Pi 解析到已不存在的 codemode 导出。
     "1.0.0",
+    "1.0.4",
+    "1.1.0",
+    "1.4.0",
+    "2.0.0",
     // Unparseable input must never pass. / 无法解析的输入一律不通过。
     "",
     "not-a-version",
@@ -54,6 +65,9 @@ test("the documented range matches the gate / 文档范围与门禁一致", () =
     assert.equal(supportsPi(version), true, version);
   assert.match(SUPPORTED_PI, /0\.84\.0/);
   assert.match(SUPPORTED_PI, /0\.87\.x/);
+  for (const version of ["0.99.0", "1.2.0", "1.3.0"])
+    assert.equal(supportsPi(version), true, version);
+  assert.match(SUPPORTED_PI, /1\.3\.x/);
   assert.ok(!SUPPORTED_PI.includes("0.85.0"));
 });
 

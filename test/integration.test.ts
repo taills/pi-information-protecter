@@ -118,6 +118,7 @@ for (const mode of ["source", "packed"] as const) {
         setLabel() {},
         getActiveTools: () => ["read", "bash"],
         getAllTools: () => [],
+        getSettings: () => ({}) as never,
         setActiveTools() {},
         refreshTools() {},
         getCommands: () => [],
