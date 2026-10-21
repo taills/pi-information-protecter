@@ -4,48 +4,64 @@
 
 ## English
 
-**Sensitive Personal Information (SPI) Protecter.**
+**Sensitive Personal Information (SPI) Protecter for Pi.**
 
-A Pi extension that inspects outgoing LLM request bodies locally, replaces configured sensitive values with random placeholders, and restores echoed placeholders locally. Suitable for URLs, phone numbers, identity numbers, names, credentials and passwords. **This is rule-based accidental-disclosure protection, not a sandbox, automatic PII detector or encryption proxy.**
+You list the values you never want to send to a model. Before a model request leaves, this extension replaces them with realistic fake values, and restores them locally in replies and tool arguments. The model sees fake data; you see your own.
+
+It protects **values you configured, in model requests** — nothing more. The next section is the important one.
+
+## What is redacted and what is not
+
+### Redacted: every request to a model
+
+| Model request | How |
+| --- | --- |
+| Your prompts, conversation history, system prompt, tool definitions, tool results | Pi's outgoing-request hook |
+| Prompt-cache warming | Same hook |
+| Context compaction and `/tree` branch summaries | The conversation is redacted before Pi summarizes it |
+| The summary `/bug` writes | Model-runtime guard |
+| `codemode` classifier and image calls | Model-runtime guard |
+| Model calls made by other extensions | Model-runtime guard |
+
+Pi offers no hook for the last three, so this extension wraps the model runtime the session shares and redacts anything sent through it. If that is not possible, startup fails with `GUARD_UNAVAILABLE` and **all** requests are blocked instead of running unprotected. `/protecter status` shows whether it is in place.
+
+If redaction itself fails for any reason, the request is **blocked**, never sent as plaintext.
+
+### Not redacted: anything that is not a model request
+
+| Action | What it sends | Why it cannot be intercepted |
+| --- | --- | --- |
+| `/bug` | The uploaded bundle: the whole transcript — your messages, model output, tool calls and their results, including file contents and command output — plus Pi version, OS, model and provider configuration, extensions and settings | Pi handles `/bug` itself and uploads over its own HTTP connection. It is also handled before extension commands, so an extension cannot even replace it. Only the summary inside it is redacted |
+| `/share` | The transcript, uploaded as a gist | Pi's own upload path, not a model request |
+| `/export` | The transcript, written to a file | Same, to local disk |
+| Session files | Everything you and the model wrote, with real values restored | Pi stores sessions; this extension does not encrypt them |
+| Tools, shell, MCP servers | Tool arguments are deliberately restored to real values so tools work | What a tool, shell command or MCP server then does with them is outside this extension. Shell can also encode or split a value past any text matching |
+| Request headers, API keys, endpoints, Pi telemetry | Credentials and routing metadata | Not part of the request body this extension rewrites |
+| Another extension's own `fetch` | Whatever it chooses | Extensions run with your permissions |
+
+**Treat `/bug`, `/share` and `/export` as publishing plaintext.** To report a bug from a session that touched real secrets, use the local zip/export option, open it, and check the contents before sending it anywhere.
+
+Two more limits worth knowing: only text matching your rules is protected — not paraphrases, split characters or values the model infers — and requests containing images, audio, video or file blocks are rejected rather than sent, because they cannot be inspected.
 
 ## Installation
 
-Requires Node.js 22+ and `@earendil-works/pi-coding-agent` **0.84.0–0.84.x, 0.85.1–0.87.x, 0.99.x or 1.2.0–1.3.x**. Every accepted release was verified by running the full suite, including the real loader and worker integration tests. 0.83.0 and earlier lack `registerMarkdownTransformer`; 0.85.0 imports `@earendil-works/pi-server`, which no Pi release declares; and 1.0.x and 1.1.0 resolve `@earendil-works/pi-codemode` to a version that no longer exports `MCP_TYPESCRIPT_PREAMBLE`, so all of them fail to load. Legacy `@mariozechner/*` releases are not supported.
+Requires Node.js 22+ and Pi (`@earendil-works/pi-coding-agent`) **0.84.0–0.84.x, 0.85.1–0.87.x, 0.99.x or 1.2.0–1.3.x**. Every version in that list was verified by running the full test suite against it; others are refused on purpose, because a wrong guess here means sending plaintext.
 
 ```bash
-# Install the latest npm release.
+# Install the latest release.
 pi install npm:pi-information-protecter
 
-# Pin a version only when you have a reason to; older releases miss fixes.
-pi install npm:pi-information-protecter@0.11.0
-
-# Alternatively, build and install from this repository without copying it.
-npm ci
-npm run build
-pi install "$PWD"
-
-# Load for one invocation.
-pi -e ./src/index.ts
-
-# Upgrade an existing installation.
+# Upgrade later.
 pi update npm:pi-information-protecter
 ```
 
-An unpinned spec installs the latest release; a pinned one stays on that version until you update it. Run `/reload` in an existing Pi session. Starting with `0.2.1`, npm releases ship compiled, minified ESM in `dist/`, not TypeScript source. Keep all three files together: `index.mjs`, `scan-worker.mjs` and `validate-worker.mjs`. Version `0.2.0` uses the previous source layout.
-
-See [CHANGELOG.md](CHANGELOG.md) for version changes. Contribution and release instructions are in the repository's `CONTRIBUTING.md` and `docs/RELEASING.md`.
-
-Maintainers publish new versions by pushing matching `v*` tags. GitHub Actions validates and publishes through npm OIDC trusted publishing without a long-lived token. Manual dry runs do not publish.
-
-Initialization uses `~/.pi/agent/protecter.<machineHash>.json`, respecting `PI_CODING_AGENT_DIR`. The hash is the first 32 hex characters of SHA-256 over a product prefix and normalized OS ID: macOS `IOPlatformUUID`, Linux `/etc/machine-id`, Windows `MachineGuid`. Missing/invalid IDs fail initialization, without random fallback. The hash is a stable identifier, not a secret. Project-local configuration is not loaded.
-
-At startup and `/reload`, recognized old configs (including legacy `protecter.json`) are validated, union-merged and deduplicated into the current target. The target is durably written and verified before unchanged old files are deleted. Invalid sources abort migration without deleting originals. Unix permissions are `0600`; unsafe links, foreign ownership and oversized files are rejected. Windows users must configure ACLs separately. See [migration details](docs/MIGRATION.md).
-
-Validated configuration is cached per extension instance. Outgoing scans and status commands never reread or stat configuration files. Editing, corrupting or deleting files after loading does not alter the active snapshot. Changes take effect on `/reload` (or `/protecter reload`, which invokes Pi reload). A new instance after session replacement also initializes once. If all configs are deleted, the next initialization creates an empty config and warns; the old memory does not survive teardown.
+Then run `/reload` in an open session. Load this extension **after** any other extension that rewrites outgoing requests, and check `/protecter status` before typing secrets: if it failed to load, Pi keeps working without it.
 
 ## Configuration
 
-**Edit the configuration in a local editor. Do not ask the model to enter real passwords or commit real configuration to Git.** The initial rule array is empty and provides no personal-information detection; the UI warns about this. The extension does not automatically identify all SPI.
+The configuration lives at `~/.pi/agent/protecter.<machineHash>.json` (it follows `PI_CODING_AGENT_DIR`). It starts empty, so **nothing is protected until you add rules**.
+
+**Edit it in a local editor. Never ask the model to write your real secrets into it, and never commit it.**
 
 ```json
 {
@@ -53,150 +69,99 @@ Validated configuration is cached per extension instance. Outgoing scans and sta
   "sensitiveWords": [
     "Alex Morgan",
     { "type": "literal", "value": "your-private-password" },
-    { "type": "regex", "pattern": "https?://[^\\s\\\"<>]+", "flags": "i" },
+    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
     { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" }
   ]
 }
 ```
 
-More examples are in [`protecter.example.json`](protecter.example.json), covering internal domains, email addresses, IPv4 and IPv6; they are not automatically enabled. Review the address and domain patterns before use: they match public values too, so a rule that is too broad can redact documentation examples, loopback addresses or dependency hosts. Number patterns do not validate authenticity or check digits. Prefer exact values for names and passwords.
+| Rule | Meaning |
+| --- | --- |
+| `"text"` | Match this exact text (case-sensitive) |
+| `{ "type": "literal", "value": "..." }` | Same, with options |
+| `{ "type": "regex", "pattern": "..." }` | JavaScript regex; the whole match is replaced |
+| `"replacement": "..."` | Always use this fixed fake value instead of a random one |
 
-- **Literals:** strings and `literal` rules match all case-sensitive occurrences, without regex interpretation.
-- **Regex:** JavaScript regex replaces the entire match. Use lookbehind to match only a credential value. Flags `g i m s u` are supported; `g` is added automatically. `/pattern/flags` shorthand is not supported.
-- Escape backslashes as `\\` in JSON. Empty-string matches are invalid; runtime zero-width matches reject the request.
-- Overlapping matches are merged to avoid exposing a longer secret's suffix. Equal values reuse a token within the extension instance.
-- Learned originals remain exact-match protected within the instance even if regex context disappears or a rule is removed. Exit/reload clears these records.
-- `/protecter` opens the local audit viewer; `/protecter logs 50` shows up to 50 recent records. `/protecter status` reports memory counts without reading configuration. `/protecter reload` invokes Pi's full reload after idle. Do not enter secrets as command arguments.
-- Avoid rules that can match a very short string. A short match has few shape-preserving candidates, and on a large payload such as a compaction request every candidate already occurs elsewhere, so the request fails with `SCAN_UNIQUE_FAILED`. Require a realistic minimum length, for example `[A-Za-z0-9._~+/-]{16,}` rather than `+`.
-- Limits: 1000 rules, 8192 characters per literal/pattern, 2-second scan timeout and 8 MiB request JSON. Exceeding limits rejects the request rather than sending plaintext.
+Tips that matter in practice:
 
-### Fixed replacement values
+- **Be precise.** A rule like `.` or "all digits" rewrites model names, IDs and tool schemas, and breaks requests.
+- **Avoid very short matches.** They cannot be replaced uniquely, and the request is blocked with `SCAN_UNIQUE_FAILED`. Prefer something like `[A-Za-z0-9._~+/-]{16,}`.
+- **Review patterns copied from examples.** [`protecter.example.json`](protecter.example.json) has ready-made rules for internal domains, emails, IPv4/IPv6, phone numbers and bearer tokens. None are enabled automatically, and broad address rules also match documentation examples and dependency hosts.
+- In JSON, write backslashes as `\\`. Flags `g i m s u` are supported (`g` is automatic); `/pattern/flags` shorthand is not.
+- A fixed `replacement` is a **reserved alias**: if the model writes that same text by itself, it is restored too. Choose distinctive values; fixed aliases also reveal more meaning than random ones.
+- Limits: 1000 rules, 8192 characters per rule, 2-second scan, 8 MiB request. Exceeding a limit blocks the request instead of sending plaintext.
 
-Object rules accept an optional `replacement`. Omit it for the existing random behavior; strings still always use random placeholders. Empty, whitespace-only, non-string or over-8192-character targets are invalid (not a random fallback).
+After editing, run `/protecter reload`.
 
-```json
-{
-  "version": 1,
-  "sensitiveWords": [
-    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
-    { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
-    { "type": "literal", "value": "randomly-protected-value" }
-  ]
-}
-```
+### Fake values keep the shape of the original
 
-Targets are literal text, not replacement templates: `$1` and `$&` are not expanded. Both literal and regex object rules support this field. Fixed aliases appear in audit records and are restored locally in replies and tool arguments after a successful scan. They are **reserved aliases**: naturally occurring identical response text will also be restored; choose distinctive targets and avoid ordinary words when that ambiguity matters. Fixed aliases expose more semantic information than random tokens.
+A match is replaced by a random value of the **same shape**, so requests stay valid:
 
-For reversible protection, duplicate targets across different rules, substring-overlapping targets, targets containing configured sensitive values, reserved `__PIP_` names and conflicting definitions are rejected. A fixed regex can represent only one distinct matched original per instance; a second distinct original rejects the request. Partially overlapping matches involving fixed rules also reject rather than silently choose a rule or expose a suffix. Pure random-rule overlaps still merge. Migration preserves targets and refuses conflicting merges without deleting originals. Reload after editing; older plugin versions do not support this field.
+| Original | Sent to the model |
+| --- | --- |
+| `13800138000` | `06864831332` |
+| `9007199254740991` (number) | `2844008842109708` (number) |
+| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` |
+| `192.168.1.10` | `101.203.3.77` |
+| `张三` | `丅欕` |
 
-### Shape-preserving replacements
+Numbers stay numbers, IP addresses stay valid, and letters are replaced within their own script, so emails, URLs and embedded JSON still parse. Punctuation, emoji and unsupported scripts are left as they are, so part of a matched value can stay visible. The trade-off: a fake value reveals length and structure, and looks like real data to the model.
 
-Since 0.6.0 a matched value is replaced by a random value of the **same shape** instead of an opaque token, so requests stay schema-valid:
+### The model reasons about the fake value
 
-| Original | Replacement | Preserved |
-| --- | --- | --- |
-| `9007199254740991` (number) | `2844008842109708` (number) | JSON type, digit count, safe-integer range |
-| `13800138000` | `06864831332` | length, digits only |
-| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` | length, case pattern, punctuation positions |
-| `张三` | `丅欕` | CJK script, character count |
-| `Nguyễn Văn Tèo` | `Ufefṉg Zżt Sàb` | Latin with diacritics, word boundaries |
-| `ひらがな` | `ゅせはっ` | Hiragana |
-| `192.168.1.10` | `101.203.3.77` | valid IPv4, octets ≤ 255 |
-| `fe80::1ff:fe23:4567` | `af44::6ea:bf19:2700` | valid IPv6, `::` and group widths |
-
-This fixes provider errors such as `'9007199254740991' is not of type 'number'`, which happened when a numeric field was replaced by a token string. Numeric JSON values stay numbers, keep their digit count and remain safe integers. Each candidate is judged inside the whole number and redrawn when it would not round-trip, so matching a decimal or an exponent no longer blocks the request; `SCAN_NUMBER_UNSAFE` remains only as a last resort, mainly when a value already mapped in text context reappears as a number.
-
-Addresses are format-aware: an IPv4 match keeps every octet within 0-255, and an IPv6 match keeps hex digits hexadecimal along with `::` compression, group widths and any embedded IPv4 tail, so `net.isIPv4`/`net.isIPv6` and provider validators still accept them. A plain per-character replacement would otherwise yield octets above 255 or non-hex characters. Addresses embedded inside a longer match, such as a URL matched as a whole, still use per-character replacement.
-
-Letters and digits are replaced inside their own writing system: ASCII, Latin-1, Latin Extended-A, Latin Extended Additional (including Vietnamese), Greek, Cyrillic, Hebrew, Arabic, Thai, Hiragana, Katakana, Hangul and CJK. Punctuation, whitespace, emoji, symbols and code points outside these ranges are kept unchanged, which is what keeps URLs, emails and embedded JSON parseable.
-
-**This is a deliberate trade-off.** An opaque token revealed only that a redaction happened; a shape-preserving value also reveals length, character classes and punctuation structure, and it looks like plausible real data to the model. Text in unsupported scripts is preserved as-is, so a rule matching such text may leave part of it visible.
-
-**The model reasons about the replacement, so answers derived from a protected value are wrong.** Asking for the third digit of a protected ID returns the third digit of the replacement, and only the value itself is restored in the reply, never the conclusion drawn from it. The answer therefore looks confident and consistent but does not match the restored value. An opaque token made this obvious, because the model could only report that it could not read the value. Do not ask the model about digits, checksums, ordering, arithmetic or comparisons involving protected values; compute those locally.
-
-Worked example, asking for the third digit of a protected phone number:
+Only the **value** is restored in a reply — never a conclusion drawn from it:
 
 | Step | Value |
 | --- | --- |
-| What you typed | `13800138000` — third digit is `8` |
-| What the provider received | `27431905882` — third digit is `4` |
-| What the model answered | "the third digit is `4`" |
-| What you see after restoration | `13800138000` … "the third digit is `4`" |
+| You typed | `13800138000` — third digit is `8` |
+| Model received | `27431905882` — third digit is `4` |
+| Model answered | "the third digit is `4`" |
+| You see | `13800138000` … "the third digit is `4`" |
 
-The number is restored, the reasoning is not, so the reply quietly contradicts itself. Nothing flags this: a derived answer is ordinary text, indistinguishable from any other sentence. The reply is also consistent across retries, because the same value keeps the same replacement, so re-asking does not reveal the error.
+The reply quietly contradicts itself, looks confident, and does not change if you retry. **Do not ask the model about digits, checksums, ordering, arithmetic or comparisons of protected values.** Compute those locally, or leave that field unprotected.
 
-If a field must be reasoned about correctly, either leave it unprotected, or give it a fixed `replacement` and accept that the alias is semantically recognisable. There is no option that both hides a value and lets the model compute over it.
+### Commands
 
-Replacements are checked so restoration stays exact: a candidate is rejected if it equals the original, is already mapped, or already appears anywhere in the same request. When no unique candidate can be produced, typically for very short matches, the request is blocked with `SCAN_UNIQUE_FAILED`. Because a shaped value is indistinguishable from ordinary content, a model that independently emits the same short string will have it restored to the original, so prefer rules that match longer, distinctive values.
-
-### Message language
-
-All notifications, prompts and diagnostics render in a single language, chosen from the environment: `PI_PROTECTER_LANG`, then `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE`, then the runtime locale. `zh*` selects Simplified Chinese; anything else falls back to English. Set `PI_PROTECTER_LANG=en` or `PI_PROTECTER_LANG=zh` to override. Error codes, stages and numeric details stay language-neutral so they can be searched and reported.
-
-### Context compaction and every hookless path
-
-Only the agent loop's own requests carry Pi's `onPayload` callback, and that callback is what fires `before_provider_request`. Pi builds the requests below from scratch, with no callback and, for most of them, no extension event at all:
-
-| Path | Pi's own hook | How it is covered |
-| --- | --- | --- |
-| Agent requests, prompt-cache warming | `onPayload` | `before_provider_request` |
-| Context compaction, split-turn prefix summaries | `session_before_compact` | The `preparation` Pi is about to summarize is redacted in place |
-| `/tree` branch summaries | `session_before_tree` | `entriesToSummarize` and the instructions are redacted in place |
-| `/bug` report summary | none | Model-runtime guard |
-| `codemode` `models.classify()`, `models.generateImages()` | none | Model-runtime guard |
-| Nested model calls by other extensions | none | Model-runtime guard |
-
-**Compaction.** Pi hands the hook the same `preparation` object it then summarizes, so the extension redacts that object in place and returns no summary of its own. Pi summarizes the redacted text with the session's own model, which means **one configured model is enough** and Pi keeps routing, credentials, retries and the token budget. The stored summary keeps the replacements, so the session file holds no plaintext summary and the next outgoing request needs no further work. Any failure cancels compaction instead of falling through to Pi summarizing stored plaintext, and reports `COMPACT_FAILED`.
-
-`/compact <instruction>` is the one exception: Pi reads those instructions from its own state, not from the event, so an instruction containing a protected value cannot be redacted. That compaction is cancelled with `COMPACT_INSTRUCTIONS`; run `/compact` without the protected value. Automatic compaction has no instructions and is unaffected.
-
-**The model-runtime guard.** The remaining paths have no event to hook, and `/bug` cannot even be shadowed by an extension command because the interactive editor handles it before extension dispatch. They all reach the provider through the one model runtime the session shares, so `session_start` wraps its call methods: a request that carries Pi's payload hook is passed through untouched (it is already covered, and its caller needs the synchronous lazy stream), and every other call is redacted first. Redaction failure cancels the call. If the runtime cannot be wrapped, startup fails with `GUARD_UNAVAILABLE` and every request is blocked rather than silently unprotected — `/protecter status` shows whether the hookless paths are covered.
-
-The guard wraps `stream` and `streamSimple`, which `complete` and `completeSimple` delegate through, plus `classify` and `generateImages` where Pi has them (they joined the runtime in 0.99; earlier supported releases have no such provider path). A regression asserts this surface against Pi's own classes, so a rename fails the test suite instead of quietly dropping coverage.
-
-Set `compaction` in the local configuration:
-
-| Value | Behaviour |
+| Command | What it does |
 | --- | --- |
-| `ask` (default) | Confirm each compaction, then redact what Pi summarizes |
+| `/protecter status` | Ready state, rule and mapping counts, compaction mode, guard state, last blocked request |
+| `/protecter logs [1-100]` | Open the local audit log viewer (default 20 records) |
+| `/protecter logs clear` | Empty this machine's audit log |
+| `/protecter reload` | Reload Pi once it is idle |
+
+Never type a secret as a command argument.
+
+### Context compaction
+
+When the context fills up, Pi summarizes the conversation. That request is built inside Pi and does **not** pass through the normal hook, so this extension redacts the conversation Pi is about to summarize and lets Pi summarize it with your current model. No second model is needed, and the saved summary keeps the fake values, so no plaintext summary is written into the session file.
+
+| `compaction` | Behaviour |
+| --- | --- |
+| `ask` (default) | Ask before each compaction, then redact |
 | `protected` | Redact without asking |
-| `off` | Always refuse; use `/new` for long sessions |
+| `off` | Never compact; use `/new` instead |
 
 ```json
-{
-  "version": 1,
-  "compaction": "protected",
-  "sensitiveWords": []
-}
+{ "version": 1, "compaction": "protected", "sensitiveWords": [] }
 ```
 
-The prompt offers allow once, allow for this session, deny once and deny for this session. A session choice lasts until reload or exit; `compaction` in the configuration is the permanent setting. Dismissing the dialog denies that compaction.
+"Allow for this session" lasts until reload or exit; the configuration value is the permanent setting. If redaction fails, compaction is cancelled rather than letting Pi send the original text.
 
-`compaction.provider`, `compaction.model`, `compaction.contextWindow` and `compaction.reserveTokens` selected a separate summarization model before 0.11.0. They are still accepted so an upgrade cannot block a working setup, but they do nothing and are reported at startup; remove them.
+One exception: `/compact <instruction>` reads the instruction from Pi's own state, which this extension cannot reach. If your instruction contains a protected value, that compaction is cancelled (`COMPACT_INSTRUCTIONS`) — run `/compact` without it. Automatic compaction and `/tree` summaries are unaffected.
 
-The model still reasons about replacements, so a summary can describe protected values inaccurately, and the stored summary shows replacements rather than the original values.
-
-Summarized `/tree` navigation takes the same internal Pi path and is protected the same way, using the same setting and prompt. Navigation without a summary sends nothing and is never gated.
-
-### Multi-turn consistency and prompt caching
-
-Random placeholders are generated once per exact original and reused within the same extension instance, including after local response restoration. Starting another scan worker does not reset the mapping. This supports stable prompt prefixes but does not guarantee provider KV-cache hits; model, tools, message ordering, cache lifetime and routing also matter. `/reload`, process restart and session-instance replacement clear mappings. Different processes do not share mappings, and audit timestamps/request IDs are never included in the model payload.
+`compaction.provider`, `compaction.model`, `compaction.contextWindow` and `compaction.reserveTokens` configured a separate summarization model before 0.11.0. They are still accepted so an upgrade cannot break a working setup, but they do nothing; remove them.
 
 ## Private audit log
 
-Successful request-body redactions append to `protecter.<machineHash>.jsonl` beside the configuration. Each JSON line includes `time` (`yyyy-mm-dd HH:mm:ss`, local time), `timezoneOffset` (minutes east of UTC), `provider`, `original`, `replacement`, `requestId` and `version`. Provider is Pi's selected provider ID, not an inferred upstream gateway vendor; unavailable metadata is recorded as `unknown`.
+Every successful redaction is appended to `protecter.<machineHash>.jsonl` next to the configuration: time, provider, the original value, the fake value and a request ID.
 
-One record is written per distinct original/token pair per successful scan; repeated occurrences in that request are deduplicated. Replacing the same original on a later request creates a new record, even when its token is reused. Existing tokens and requests without matches add no records. These are **local redaction events, not proof of network delivery**: cancellation, another hook or a provider failure can occur afterward.
+**This file contains your real secrets and the mapping back to them.** It is created with `0600` permissions, is never uploaded and is not encrypted. Do not share it. `/protecter logs` is local-TUI only and confirms before showing plaintext; RPC and print modes never display it.
 
-`/protecter` or `/protecter logs [1-100]` reads the most recent records (20 by default). Local TUI only: choose a time/provider entry, then confirm before revealing plaintext. The editor is a preview and discards edits. Controls are escaped; long previews are truncated. RPC/print modes do not display secrets, and the command never calls `sendMessage` or writes session entries.
+A record means "replaced locally", not "delivered to the provider". `/protecter logs clear` empties this machine's log after confirmation — logical deletion, not secure erasure. If the log is full, locked or unwritable, matched requests are blocked rather than silently losing the audit trail.
 
-Use `/protecter logs clear` to empty only the current machine's audit log. Local TUI confirmation is mandatory; cancelling, RPC/print mode or extra arguments do nothing. After confirmation, Pi waits for idle, queues the clear with scans and acquires the same cross-process log lock as appends. The validated file is truncated and synced, not unlinked; missing logs are a successful no-op. Configuration, other machine logs and in-memory mappings remain unchanged. New requests may immediately append new records. Full or partial-tail logs can be cleared, but unsafe links and occupied/stale locks are never bypassed. This is irreversible logical deletion, **not secure erasure** of filesystem snapshots/backups.
+## When a request is blocked
 
-**Logs contain real secrets and reversible mappings.** Unix permissions are 0600; symlinks, hard links and other-user files are rejected. Tool guards cover current/old hash log names and aliases but are not a sandbox. Logs are not encrypted, automatically rotated, migrated with configuration or used to rebuild mappings. Stop all Pi processes before locally archiving/deleting logs or inspecting a stale `.jsonl.lock`. Reading is bounded to the last 1 MiB, display to 100 records and 20,000 characters per preview. A log is capped at 32 MiB and a request batch at 8 MiB; full, unwritable, partial-tail or locked logs block matched requests rather than silently losing audits. Failed scans add no records; a hard crash can leave a partial batch that requires local repair.
-
-## Diagnosing a blocked request
-
-When a request is blocked, the notification names the failing stage, a stable code and a suggested action instead of one generic message:
+Blocked requests fail closed: the outgoing payload is replaced with `{}`, and you get a code and a suggested action.
 
 ```text
 SPI Protecter blocked this request
@@ -206,331 +171,347 @@ Action: Require a non-empty match in the numbered rule
 Details: /protecter status
 ```
 
-Stages are `initialization`, `configuration`, `migration`, `request`, `scan`, `worker`, `audit` and `internal`. Coordinates appear only when known: `rule` and `otherRule` are 1-based indexes into `sensitiveWords`, `node` counts scanned payload nodes, `bytes`/`limit`/`timeoutMs` report the exceeded limit, and `errno` is the OS error code.
+`rule=1` is the 1-based index in `sensitiveWords`. Stages are `initialization`, `configuration`, `migration`, `request`, `scan`, `worker`, `audit` and `internal`. Notifications scroll away, so `/protecter status` repeats the last one.
 
-Common codes include `CONFIG_JSON`, `CONFIG_SCHEMA`, `CONFIG_REGEX`, `CONFIG_TARGET`, `CONFIG_CONFLICT`, `CONFIG_EMPTY_MATCH`, `CONFIG_SENSITIVE_TARGET`, `CONFIG_ALIAS_CONFLICT`, `CONFIG_UNSAFE`, `MIGRATION_LOCKED`, `MIGRATION_CHANGED`, `PAYLOAD_JSON`, `PAYLOAD_SIZE`, `SCAN_TIMEOUT`, `SCAN_MATCH_LIMIT`, `SCAN_COMPLEXITY`, `SCAN_ATTACHMENT`, `SCAN_JSON_REWRITE`, `SCAN_NUMBER_UNSAFE`, `SCAN_UNIQUE_FAILED`, `FIXED_OVERLAP`, `FIXED_ALIAS_REUSED`, `AUDIT_FULL`, `AUDIT_PARTIAL`, `AUDIT_LOCKED`, `AUDIT_UNSAFE` and `WORKER_FAILED`.
-
-Notifications can scroll away, so `/protecter status` repeats the last recorded block for the session, and a tool blocked while protection is unavailable reports the same cause. Requests still fail closed: the outgoing payload is replaced with `{}`.
-
-**Diagnostics never include request text, matched originals, replacement values, configuration content, file paths or raw OS messages.** Only catalog codes, non-negative integer coordinates and an allow-listed `errno` are emitted, so they are safe to paste into an issue. Because matched content is excluded, locating an offending rule may still require local inspection using the reported rule index.
+**Diagnostics never contain request text, matched values, fake values, configuration content, file paths or raw OS messages** — only a code, numbers and an allow-listed `errno`. They are safe to paste into an issue, which also means locating the offending rule may need a local look.
 
 ## How it works
 
 ```text
-Input / history / tools / system prompt / tool definitions
-                         ↓
-before_provider_request: final JSON text scan
-                         ↓
-shape-preserving random value → LLM gateway
-                         ↓
-Local response and tool-argument restoration
+your input / history / tool definitions / tool results
+                        ↓
+        scan the final request JSON, replace matches
+                        ↓
+            fake values → model provider
+                        ↓
+     restore values in replies and tool arguments
 ```
 
-1. Scan JSON strings, keys and numbers, including decoded JSON-string tool arguments. Local user input and original history are unchanged.
-2. Generate a shape-preserving replacement with `crypto.randomBytes`. Runtime mappings stay in memory and are not restored across restarts. **Since 0.3.0, successful original/replacement pairs are also persisted in the private audit log.** They are never injected into configuration, session custom entries or model prompts.
-3. Restore finalized assistant text, thinking and tool arguments. The TUI Markdown transformer restores complete streamed tokens; partial tokens may briefly appear. RPC/JSON deltas remain masked until final `message_end`. Altered or truncated tokens cannot be restored.
-4. Restore tool arguments before execution so legitimate local operations use original values; redact them again on subsequent requests. **Restoring credentials is not tool authorization or exfiltration prevention.**
-5. Execute regex scans in a terminable worker. On failure, return `{}` and request cancellation rather than relying on hook exceptions swallowed by Pi. An empty request or provider validation error may still occur, but the handler does not return the original payload.
+1. Scan the final request JSON — strings, keys, numbers and JSON-encoded tool arguments. Your local input and history are never modified.
+2. Generate fake values with `crypto.randomBytes`. Mappings stay in memory, and one value always maps to the same fake value within a session, which also keeps prompt prefixes stable.
+3. Restore values in the finished reply, in thinking blocks, and in tool arguments before a tool runs, so local tools work on real data.
+4. Run your regexes in a worker with a 2-second limit. On any failure, send `{}` and cancel instead of falling back to the original request.
 
-### Configuration access guard
+`/reload`, restart or switching sessions clears the mappings; fake values in older summaries can no longer be turned back after that.
 
-**Outgoing redaction is the main defense; direct-access blocking is supplementary.** Shell is not disabled wholesale.
+The extension also stops tools from reading its own configuration and audit log, resolving `~`, `@`, relative paths, `file://` and symlinks. This is a convenience guard, not a sandbox: shell and third-party tools can work around it.
 
-- File tools check actual path arguments, not document bodies; writing documentation that mentions config filenames is allowed. In the active config directory, legacy/current hash filenames and migration artifacts are protected. Shell command fields retain best-effort filename checks, so shell mentions can still produce false positives.
-- Resolve `@`, `~`, relative paths and `file://`; check symlink/inode aliases. Block `grep/find/ls` over ancestor directories containing the configuration.
-- Attempt whole-text masking if the complete original configuration accidentally appears in a request.
-- **Best effort only:** dynamic shell, base64, split output, nested symlinks, arbitrary third-party tools and network sends can bypass these checks. This cannot guarantee that a malicious model never obtains configuration.
-
-## Limitations — read first
-
-- Only rule-matching text is protected, not paraphrases, split characters or arbitrary encodings. Common image/audio/video/file blocks reject the entire request because SPI cannot be reliably inspected; no OCR is provided.
-- Compaction and summarized `/tree` navigation redact what Pi is about to summarize, in place, because Pi builds those requests internally and never routes them through `before_provider_request`; Pi then summarizes the redacted text with the session's own model. Navigation without summaries sends nothing. Pi's other hookless model calls, the `/bug` summary and nested `codemode` or extension calls, are covered by the model-runtime guard. See [Context compaction and every hookless path](#context-compaction-and-every-hookless-path).
-- Exit, reload and session switching discard mappings. Final restored local messages remain readable; crash leftovers, old summaries and raw deltas cannot recover tokens across restarts.
-- Broad rules such as `.` or all digits may alter protocol fields, model names, tool schemas or IDs and break requests. Matching numbers become token strings. Prefer precise rules.
-- Reused tokens reveal equality relationships; context may imply identity. This is not formal anonymization.
-- Model calls are covered; transfers that are not model calls are not. `/bug`'s uploaded bundle, `/share` and `/export` send the stored transcript over their own HTTP paths, which no extension API can intercept, and the transcript holds restored plaintext. Hooks also do not cover HTTP headers, authentication keys, gateway endpoints, Pi telemetry, an extension's own `fetch`, or tool networking, including arguments handed to MCP servers. The gateway still receives its authentication credentials. Treat `/bug`, `/share` and `/export` as plaintext disclosure and review what they contain first.
-- **Load after other payload rewriters and trust every installed extension.** Later handlers can reintroduce originals. Extensions have local permissions, and Pi may continue if this extension fails to load. Check status before entering secrets.
-- Local sessions, terminals, exports and files written by tools may contain plaintext. They are not encrypted or cleaned by this project.
-
-See [SECURITY.md](SECURITY.md) for the threat model.
-
-## Development and verification
+## Development and debugging
 
 ```bash
 npm ci
+npm run check        # build + typecheck + all tests
+npm run typecheck    # types only
+npm test             # tests only (also rebuilds dist/)
+npm run build        # bundle and minify into dist/
+```
+
+Run the extension from source against a **throwaway** Pi configuration directory, never your real one:
+
+```bash
+export PI_CODING_AGENT_DIR="$(mktemp -d)"
+export PI_PROTECTER_LANG=en          # pin message language
+pi -e ./src/index.ts
+```
+
+Write fictional rules into `$PI_CODING_AGENT_DIR/protecter.json`, start Pi, and the machine-hash configuration is created from it on first run.
+
+### Where things live
+
+| Path | Role |
+| --- | --- |
+| `src/index.ts` | Hook and command wiring: outgoing requests, restoration, tool calls, compaction, startup checks |
+| `src/engine.ts` | Scan/restore orchestration, mapping table, worker lifecycle, audit writes |
+| `src/scan-worker.mjs` | Runs your regexes in a terminable worker |
+| `src/shape.mjs` | Generates shape-preserving fake values |
+| `src/compaction.ts` | Redacts what Pi is about to summarize (compaction and `/tree`) |
+| `src/guard-runtime.ts` | Model-runtime choke point for calls that have no hook |
+| `src/config.ts`, `src/migration.ts` | Parsing, validation, machine-hash configuration migration |
+| `src/guard.ts` | Blocks tool access to the configuration and audit log |
+| `src/diagnostics.ts`, `src/locale.ts` | Error codes, stages and bilingual messages |
+| `src/compat.ts` | The verified Pi version gate |
+
+### Debugging workflow
+
+- **Run one test file:** `npx tsx --test test/guard-runtime.test.ts`.
+- **Reproduce a block as a test, not against a live gateway.** `test/integration.test.ts` drives Pi's real loader and runner and asserts on the actual outgoing payload; copy one of its cases and substitute a fictional value. Never test with real secrets or a real provider.
+- **Check what actually left the process.** The audit log records each original/fake pair, and `/protecter status` repeats the last block with its code and stage. Diagnostics deliberately exclude content, so the rule index is the pointer back to your configuration.
+- **Hookless paths** are covered by `test/hookless-paths.test.ts` (compaction and `/tree` through the real runner) and `test/guard-runtime.test.ts` (the model-runtime guard, including assertions against Pi's own classes so a Pi rename fails the suite instead of silently dropping coverage).
+- **The packed artifact is tested too.** `npm test` builds the real npm tarball, extracts it, and loads `dist/index.mjs` with Pi's loader and both workers, so minification and worker paths are verified, not assumed.
+
+### Widening Pi compatibility
+
+`src/compat.ts` refuses any Pi release that has not been verified, because a wrong guess means sending plaintext rather than breaking a feature. To add a release, install it and run the full suite against it:
+
+```bash
+npm i -D @earendil-works/pi-coding-agent@<version>
 npm run check
 ```
 
-Tests use temporary directories and fictional secrets, never real user configuration, API keys or LLM gateways. Coverage includes masking/restoration, regex timeout, permissions, path guards and real Pi loader/runner integration. All Markdown, comments and new commit messages must be English + Simplified Chinese.
+Only then update `supportsPi`, `SUPPORTED_PI` and `peerDependencies`, keeping the runtime gate and the declared range identical.
 
-`npm run build` bundles local modules with esbuild, removes TypeScript types and minifies output. Node built-ins and Pi peer packages remain external. No source maps or source files are published; source remains available on GitHub. Minification reduces size, not visibility or security. `npm pack` rebuilds via `prepack`; `npm publish` first runs checks. Tests also extract the actual npm tarball and run Pi's loader and both workers from it. See the repository's `docs/BUILDING.md` for details.
+More detail: [`CONTRIBUTING.md`](CONTRIBUTING.md) for the bilingual and review rules, [`docs/BUILDING.md`](docs/BUILDING.md) for packaging, [`docs/RELEASING.md`](docs/RELEASING.md) for publishing, [`SECURITY.md`](SECURITY.md) for the threat model, [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
-API references: [Pi Extensions](https://pi.dev/docs/latest/extensions), local 0.86.1 documentation and runner implementation. Licensed under MIT.
+## Messages and language
+
+Messages appear in one language, chosen from `PI_PROTECTER_LANG`, then `LC_ALL`, `LC_MESSAGES`, `LANG`, `LANGUAGE`, then the runtime locale. `zh*` selects Simplified Chinese, anything else English. Codes and numbers stay language-neutral.
+
+Licensed under MIT.
 
 ---
 
 ## 简体中文
 
-**个人敏感信息保护插件。**
+**Pi 的个人敏感信息（SPI）保护插件。**
 
-这是一个 Pi 扩展：在本地审查 LLM 出站请求体，用随机占位符替换配置中的敏感值，并在本地还原模型返回的占位符。适用于 URL、电话号码、身份证／ID、姓名、凭证和密码。**这是基于规则的意外泄漏防护，不是沙箱、自动 PII 检测器或加密代理。**
+你列出不希望发给模型的值，本扩展在模型请求发出之前把它们替换成形态逼真的假值，并在回复和工具参数中于本地还原。模型看到的是假数据，你看到的仍是自己的数据。
+
+它保护的是**你配置过的值，且仅限模型请求**——仅此而已。下一节是最重要的内容。
+
+## 哪些会脱敏，哪些不会
+
+### 会脱敏：所有发往模型的请求
+
+| 模型请求 | 覆盖方式 |
+| --- | --- |
+| 你的提示、对话历史、系统提示、工具定义、工具结果 | Pi 的出站请求钩子 |
+| 提示缓存预热 | 同一钩子 |
+| 上下文压缩与 `/tree` 分支摘要 | 在 Pi 生成摘要之前先脱敏对话 |
+| `/bug` 生成的那段摘要 | 模型运行时闸门 |
+| `codemode` 的分类与图像调用 | 模型运行时闸门 |
+| 其他扩展发起的模型调用 | 模型运行时闸门 |
+
+Pi 没有为后三者提供任何钩子，因此本扩展包装会话共享的模型运行时，对经由它发出的内容一律脱敏。若无法完成包装，启动会以 `GUARD_UNAVAILABLE` 失败并拦截**所有**请求，而不是在无保护状态下运行。`/protecter status` 会显示它是否已就位。
+
+若脱敏本身因任何原因失败，请求会被**拦截**，绝不以明文发出。
+
+### 不会脱敏：一切不属于模型请求的传输
+
+| 操作 | 发送的内容 | 为什么无法拦截 |
+| --- | --- | --- |
+| `/bug` | 上传的报告包：完整会话记录——你的消息、模型输出、工具调用及其结果（含读取到的文件内容与命令输出）——以及 Pi 版本、操作系统、模型与提供商配置、已加载扩展和设置 | `/bug` 由 Pi 自己处理，并通过它自身的 HTTP 连接上传。它还在扩展命令之前被处理，扩展连替换它都做不到。只有其中那段摘要会被脱敏 |
+| `/share` | 会话记录，以 gist 形式上传 | 走 Pi 自己的上传路径，不是模型请求 |
+| `/export` | 会话记录，写入文件 | 同理，写到本地磁盘 |
+| 会话文件 | 你与模型写下的全部内容，且其中的值已还原为真实值 | 会话由 Pi 保存，本扩展不对其加密 |
+| 工具、shell、MCP 服务器 | 工具参数会被刻意还原为真实值，工具才能正常工作 | 此后工具、shell 命令或 MCP 服务器拿这些值做什么都不在本扩展范围内；shell 还可通过编码或拆分绕过任何文本匹配 |
+| 请求头、API key、网关地址、Pi 遥测 | 凭证与路由元数据 | 不属于本扩展改写的请求体 |
+| 其他扩展自己的 `fetch` | 由它自行决定 | 扩展以你的权限运行 |
+
+**请把 `/bug`、`/share`、`/export` 视为公开明文。** 若需要为接触过真实秘密的会话提交错误报告，请使用本地 zip／导出选项，打开它，确认内容之后再决定发给谁。
+
+另外两点同样要紧：只有命中你的规则的文本会被保护——改写、片段值以及模型推断出的内容都不会；包含图片、音频、视频或文件块的请求会被拒绝而不是发送，因为它们无法被检查。
 
 ## 安装
 
-要求 Node.js 22+ 和 `@earendil-works/pi-coding-agent` **0.84.0–0.84.x、0.85.1–0.87.x、0.99.x 或 1.2.0–1.3.x**。每个受支持版本都经过完整测试验证（含真实加载器与 worker 集成测试）。0.83.0 及更早缺少 `registerMarkdownTransformer`；0.85.0 引用了任何 Pi 版本都未声明的 `@earendil-works/pi-server`；1.0.x 与 1.1.0 将 `@earendil-works/pi-codemode` 解析到已不再导出 `MCP_TYPESCRIPT_PREAMBLE` 的版本，三者均无法加载。不支持旧 `@mariozechner/*` 版本。
+要求 Node.js 22+ 与 Pi（`@earendil-works/pi-coding-agent`）**0.84.0–0.84.x、0.85.1–0.87.x、0.99.x 或 1.2.0–1.3.x**。清单中的每个版本都经过完整测试验证；其余版本会被有意拒绝——此处判断失误意味着发送明文。
 
 ```bash
-# 安装最新 npm 版本。
+# 安装最新版本。
 pi install npm:pi-information-protecter
 
-# 确有需要时才固定版本；旧版本缺少后续修复。
-pi install npm:pi-information-protecter@0.11.0
-
-# 或在本仓库构建后本地安装，不复制仓库。
-npm ci
-npm run build
-pi install "$PWD"
-
-# 单次加载。
-pi -e ./src/index.ts
-
-# 升级已安装的版本。
+# 后续升级。
 pi update npm:pi-information-protecter
 ```
 
-不带版本号安装最新版；固定版本后将停留在该版本，直到手动更新。
-
-已运行的 Pi 请执行 `/reload`。从 `0.2.1` 起，npm 发布 `dist/` 中编译压缩后的 ESM，而非 TypeScript 源码。必须同时保留 `index.mjs`、`scan-worker.mjs` 和 `validate-worker.mjs` 三个文件。`0.2.0` 采用旧源码布局。
-
-版本变更见 [CHANGELOG.md](CHANGELOG.md)。贡献与发布流程见仓库内的 `CONTRIBUTING.md` 和 `docs/RELEASING.md`。
-
-维护者通过推送匹配版本的 `v*` 标签发布新版本。GitHub Actions 验证后使用 npm OIDC 可信发布，不需要长期令牌；手动试运行不会发布。
-
-初始化使用 `~/.pi/agent/protecter.<machineHash>.json`，遵循 `PI_CODING_AGENT_DIR`。哈希由产品前缀与规范化系统标识计算 SHA-256，取前 32 位十六进制；macOS 使用 `IOPlatformUUID`、Linux 使用 `/etc/machine-id`、Windows 使用 `MachineGuid`。标识缺失或无效时拒绝初始化，不随机回退。哈希是稳定标识而非秘密，不加载项目级配置。
-
-启动和重载时，识别到的旧配置（包括原固定文件名）会先验证，再合并去重到当前目标；目标持久化写入并验证后才删除未变化的旧文件。无效来源会中止迁移而不删除原文件。Unix 权限为 `0600`，拒绝不安全链接、他人所有文件和超限文件；Windows 需自行设置 ACL。详见[迁移文档](docs/MIGRATION.md)。
-
-验证后的配置按扩展实例缓存。出站扫描及状态命令不重新读取或检查配置文件；加载后修改、损坏或删除文件不改变当前快照。修改在重载后生效；`/protecter reload` 会调用 Pi 重载，会话切换产生的新实例也初始化一次。若全部配置已删除，下次初始化会创建空配置并警告，旧内存不跨实例销毁保留。
+随后在已打开的会话中执行 `/reload`。请把本扩展加载在任何其他改写出站请求的扩展**之后**；输入秘密前先看 `/protecter status`：若它加载失败，Pi 会在没有它的情况下继续工作。
 
 ## 配置
 
-**请用本地编辑器修改配置，不要让模型填写真实密码，也不要把真实配置提交到 Git。** 初始规则数组为空，不具备个人信息检测能力，界面会给出警告。插件不会自动识别所有 SPI。
+配置文件位于 `~/.pi/agent/protecter.<machineHash>.json`（遵循 `PI_CODING_AGENT_DIR`）。它初始为空，因此**在你添加规则之前，什么都不会被保护**。
+
+**请在本地编辑器中修改。不要让模型把你的真实秘密写进去，也不要提交到 Git。**
 
 ```json
 {
   "version": 1,
   "sensitiveWords": [
-    "张三",
+    "Alex Morgan",
     { "type": "literal", "value": "your-private-password" },
-    { "type": "regex", "pattern": "https?://[^\\s\\\"<>]+", "flags": "i" },
+    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
     { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" }
   ]
 }
 ```
 
-更多示例见 [`protecter.example.json`](protecter.example.json)，涵盖内网域名、邮箱地址、IPv4 和 IPv6，不会自动启用。地址与域名规则请先核对：它们同样会匹配公开值，过于宽泛的规则可能脱敏文档示例、回环地址或依赖仓库域名。号码规则不验证真实性或校验位，姓名和密码建议使用精确值。
-
-- **字面规则：**字符串和 `literal` 按大小写敏感方式匹配全部出现位置，不作正则解释。
-- **正则：**JavaScript 正则替换整个匹配，可用后行断言仅匹配凭证值。支持 `g i m s u`，自动补 `g`，不支持 `/pattern/flags` 简写。
-- JSON 中的反斜杠写作 `\\`。不允许匹配空字符串；运行时零宽匹配会拒绝请求。
-- 合并重叠匹配，避免暴露长敏感值的后缀；同一实例内相同原文复用占位符。
-- 已识别原文在当前实例内持续受到精确匹配保护，即使正则上下文消失或规则被删除；退出或重载清除记录。
-- `/protecter` 打开本地审计查看器，`/protecter logs 50` 查看最近最多 50 条；`/protecter status` 只报告内存数量，不读取配置。`/protecter reload` 等待空闲后完整重载。不要在命令参数中填写秘密。
-- 避免可能匹配极短字符串的规则。短匹配的同形候选值很少，而在压缩请求这类大载荷下每个候选值都已出现在别处，请求会以 `SCAN_UNIQUE_FAILED` 失败。请设定合理的最小长度，例如用 `[A-Za-z0-9._~+/-]{16,}` 而非 `+`。
-- 限制为 1000 条规则、每个词或模式 8192 字符、扫描 2 秒、请求 JSON 8 MiB；超限拒绝，不降级发送明文。
-
-### 固定替换值
-
-对象规则支持可选 `replacement` 字段。省略时保持随机替换，纯字符串规则始终使用随机占位符。空字符串、全空白、非字符串或超过 8192 字符的目标属于无效配置，不回退为随机。
-
-```json
-{
-  "version": 1,
-  "sensitiveWords": [
-    { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
-    { "type": "literal", "value": "example-private-key-123", "replacement": "MyPrivateKey" },
-    { "type": "literal", "value": "randomly-protected-value" }
-  ]
-}
-```
-
-目标按字面文本处理，不是替换模板，`$1`、`$&` 不展开。字面和正则对象均支持该字段。成功扫描后，固定别名同样写入审计，并在本地回复和工具参数中还原。它属于**保留别名**：回复中自然出现的相同文本也会被还原；如果介意此歧义，请选择独特目标而非普通词。固定别名比随机占位符暴露更多语义信息。
-
-为保持可逆保护，不同规则复用相同目标、目标互为子串、目标包含配置敏感值、使用保留 `__PIP_` 名称或定义冲突时拒绝加载。固定正则在同一实例中只能表示一种不同的匹配原文，第二种原文会导致请求被拒绝。涉及固定规则的部分重叠匹配也拒绝，不静默选择规则或泄漏后缀；纯随机规则重叠仍合并。迁移保留固定目标，遇到冲突停止且不删除原文件。修改后请重载；旧插件版本不支持此字段。
-
-### 同形替换
-
-从 0.6.0 起，命中内容不再替换为不透明占位符，而是替换为**同形**随机值，使请求保持结构有效：
-
-| 原文 | 替换值 | 保留特征 |
-| --- | --- | --- |
-| `9007199254740991`（数字） | `2844008842109708`（数字） | JSON 类型、位数、安全整数范围 |
-| `13800138000` | `06864831332` | 长度、纯数字 |
-| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` | 长度、大小写形态、标点位置 |
-| `张三` | `丅欕` | 汉字体系、字数 |
-| `Nguyễn Văn Tèo` | `Ufefṉg Zżt Sàb` | 带重音拉丁字母、词边界 |
-| `ひらがな` | `ゅせはっ` | 平假名 |
-| `192.168.1.10` | `101.203.3.77` | 合法 IPv4，每段不超过 255 |
-| `fe80::1ff:fe23:4567` | `af44::6ea:bf19:2700` | 合法 IPv6，保留 `::` 与分组宽度 |
-
-这修复了类似 `'9007199254740991' is not of type 'number'` 的提供商错误：过去数值字段会被替换成字符串占位符。现在数值仍为数字，位数不变并保持安全整数；候选值在整个数值上下文中校验，不合法则重新抽取，因此匹配小数或指数不再拦截请求；`SCAN_NUMBER_UNSAFE` 仅作为最后手段保留，主要出现在文本上下文已建立映射的值再次以数值形式出现时。
-
-地址采用格式感知替换：IPv4 匹配保证每段在 0-255 内，IPv6 匹配保证十六进制字符仍为十六进制，并保留 `::` 压缩写法、分组宽度及末尾嵌入的 IPv4，因此 `net.isIPv4`/`net.isIPv6` 和提供商校验仍然通过。若仅逐字符替换，会产生超过 255 的段或非十六进制字符。嵌在更长匹配（如整条 URL）中的地址仍按字符替换。
-
-字母和数字在各自文字体系内替换：ASCII、Latin-1、Latin Extended-A、Latin Extended Additional（含越南语）、希腊语、西里尔语、希伯来语、阿拉伯语、泰语、平假名、片假名、谚文及汉字。标点、空白、表情、符号以及上述范围之外的码位保持不变，这正是 URL、邮箱和内嵌 JSON 仍可解析的原因。
-
-**这是有意为之的权衡。** 不透明占位符仅暴露“发生了脱敏”；同形值还会暴露长度、字符类别和标点结构，并且在模型看来像真实数据。不支持的文字体系会原样保留，因此匹配这类文本的规则可能残留部分可见内容。
-
-**模型推理的是替换值，因此从受保护值推导出的答案是错的。** 询问受保护身份证号的第 3 位，得到的是替换值的第 3 位；回复中只有值本身会被还原，由它推导出的结论不会。因此答案看似笃定且自洽，却与还原后的值对不上。不透明占位符不会有这个问题，因为模型只能表示自己读不到该值。请勿让模型回答涉及受保护值的位数、校验位、排序、算术或比较，这类计算应在本地完成。
-
-实例：询问受保护手机号的第 3 位。
-
-| 环节 | 值 |
+| 规则 | 含义 |
 | --- | --- |
-| 你输入的内容 | `13800138000`——第 3 位是 `8` |
-| 提供商实际收到的 | `27431905882`——第 3 位是 `4` |
-| 模型的回答 | “第 3 位是 `4`” |
-| 还原后你看到的 | `13800138000` … “第 3 位是 `4`” |
+| `"text"` | 匹配该精确文本（区分大小写） |
+| `{ "type": "literal", "value": "..." }` | 同上，可带选项 |
+| `{ "type": "regex", "pattern": "..." }` | JavaScript 正则，整个匹配被替换 |
+| `"replacement": "..."` | 固定使用该假值，而非随机值 |
 
-号码被还原了，推理没有，因此回复会静默地自相矛盾。没有任何机制能发现它：推导出的答案就是普通文本，与其他句子无法区分。重试也不会暴露错误，因为同一值始终对应同一替换值，结果前后一致。
+实践中要紧的几点：
 
-如果某个字段必须被正确推理，要么不保护它，要么为它设置固定 `replacement` 并接受别名在语义上可识别。不存在既隐藏值、又能让模型对它运算的方案。
+- **要精确。** 像 `.` 或"所有数字"这样的规则会改写模型名、ID 与工具结构，导致请求失败。
+- **避免过短的匹配。** 它们无法生成唯一替换值，请求会以 `SCAN_UNIQUE_FAILED` 被拦截。建议写成 `[A-Za-z0-9._~+/-]{16,}` 之类。
+- **核对从示例复制的正则。** [`protecter.example.json`](protecter.example.json) 提供了内部域名、邮箱、IPv4/IPv6、手机号与 Bearer 令牌的现成规则，它们都不会自动启用；过宽的地址规则也会命中文档示例和依赖主机名。
+- JSON 中反斜杠要写成 `\\`。支持 `g i m s u` 标志（`g` 自动添加）；不支持 `/pattern/flags` 简写。
+- 固定 `replacement` 是**保留别名**：若模型自己写出同样的文本，也会被还原。请选择独特的值；固定别名也比随机值暴露更多语义。
+- 限制：1000 条规则、每条 8192 字符、扫描 2 秒、请求 8 MiB。超限会拦截请求，而不是发送明文。
 
-为保证还原精确，候选值会被校验：与原文相同、已被占用、或已出现在同一请求中的候选值会被拒绝。无法生成唯一值时（通常是极短匹配），以 `SCAN_UNIQUE_FAILED` 拦截请求。由于同形值与普通内容难以区分，若模型自行输出了相同的短字符串，它会被还原为原文，因此应优先匹配更长、更有辨识度的值。
+修改后执行 `/protecter reload`。
 
-### 消息语言
+### 假值保持原值的形态
 
-所有通知、提示和诊断仅以**单一语言**呈现，语言按环境变量依次选取：`PI_PROTECTER_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`，最后是运行时区域。`zh*` 选择简体中文，其余回退英文。可设置 `PI_PROTECTER_LANG=en` 或 `PI_PROTECTER_LANG=zh` 覆盖。错误码、阶段和数值细节保持语言无关，便于搜索和反馈。
+命中的值会被替换为**同形态**的随机值，使请求依然合法：
 
-### 上下文压缩与所有无钩子路径
-
-只有智能体循环自身的请求携带 Pi 的 `onPayload` 回调，而正是该回调触发 `before_provider_request`。下列请求由 Pi 从零构造，不带该回调，其中大多数甚至没有任何扩展事件：
-
-| 路径 | Pi 自身的钩子 | 覆盖方式 |
-| --- | --- | --- |
-| 智能体请求、提示缓存预热 | `onPayload` | `before_provider_request` |
-| 上下文压缩、split-turn 前缀摘要 | `session_before_compact` | 对 Pi 即将摘要的 `preparation` 原地脱敏 |
-| `/tree` 分支摘要 | `session_before_tree` | 对 `entriesToSummarize` 与指令原地脱敏 |
-| `/bug` 报告摘要 | 无 | 模型运行时闸门 |
-| `codemode` 的 `models.classify()`、`models.generateImages()` | 无 | 模型运行时闸门 |
-| 其他扩展发起的嵌套模型调用 | 无 | 模型运行时闸门 |
-
-**压缩。** Pi 交给钩子的 `preparation` 就是它随后用于摘要的同一对象，因此本扩展对该对象原地脱敏，并不返回自己生成的摘要。Pi 用会话自身的模型对脱敏后的文本生成摘要，这意味着**只配一个模型就够了**，且路由、凭证、重试与 token 预算仍由 Pi 负责。保存下来的摘要保留替换值，因此会话文件中不存在明文摘要，下一次出站请求也无需额外处理。任何失败都会取消压缩，而不回退到 Pi 对已存明文生成摘要，并上报 `COMPACT_FAILED`。
-
-唯一例外是 `/compact <指令>`：Pi 从自身状态而非事件读取该指令，因此含受保护值的指令无法脱敏。这类压缩会以 `COMPACT_INSTRUCTIONS` 取消；请不带受保护值执行 `/compact`。自动压缩没有指令，不受影响。
-
-**模型运行时闸门。** 其余路径没有可挂的事件，且 `/bug` 连扩展命令都无法遮蔽——交互式编辑器在扩展分发之前就处理了它。它们都经过会话共享的那一个模型运行时发往提供商，因此 `session_start` 会包装其调用方法：携带 Pi 请求钩子的调用原样直通（它已被覆盖，且调用方需要同步的惰性流），其余调用一律先脱敏。脱敏失败即取消该调用。若运行时无法被包装，启动将以 `GUARD_UNAVAILABLE` 失败并拦截所有请求，而不是在无保护的状态下继续——`/protecter status` 会显示无钩子路径是否已覆盖。
-
-闸门包装 `stream` 与 `streamSimple`（`complete`、`completeSimple` 经由二者转发），并在 Pi 具备时一并包装 `classify` 与 `generateImages`（它们在 0.99 加入运行时，更早的受支持版本没有该提供商路径）。新增回归直接对 Pi 自身的类做断言，因此重命名会导致测试失败，而不是静默丢掉覆盖。
-
-在本地配置中设置 `compaction`：
-
-| 取值 | 行为 |
+| 原值 | 发给模型的值 |
 | --- | --- |
-| `ask`（默认） | 每次压缩先确认，再对 Pi 要摘要的内容脱敏 |
+| `13800138000` | `06864831332` |
+| `9007199254740991`（数字） | `2844008842109708`（数字） |
+| `Alex.Morgan@Example.COM` | `Ufqz.Vwtudb@Rjdnpxe.HGZ` |
+| `192.168.1.10` | `101.203.3.77` |
+| `张三` | `丅欕` |
+
+数字仍是数字，IP 仍是合法地址，字母在各自文字体系内替换，因此邮箱、URL 与内嵌 JSON 仍可解析。标点、表情与不支持的文字体系原样保留，因此命中值可能部分可见。代价是：假值会暴露长度与结构，并且在模型看来像真实数据。
+
+### 模型推理的是假值
+
+回复中只有**值**会被还原，由它推导出的结论不会：
+
+| 步骤 | 值 |
+| --- | --- |
+| 你输入 | `13800138000`——第三位是 `8` |
+| 模型收到 | `27431905882`——第三位是 `4` |
+| 模型回答 | "第三位是 `4`" |
+| 你看到 | `13800138000` … "第三位是 `4`" |
+
+回复因此自相矛盾，却看起来笃定，重试也不会变。**不要让模型回答受保护值的位数、校验位、排序、算术或比较问题。** 这些请在本地计算，或让该字段不受保护。
+
+### 命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `/protecter status` | 就绪状态、规则与映射数量、压缩模式、闸门状态、最近一次拦截 |
+| `/protecter logs [1-100]` | 打开本地审计日志查看器（默认 20 条） |
+| `/protecter logs clear` | 清空本机审计日志 |
+| `/protecter reload` | 等待空闲后重载 Pi |
+
+不要把秘密作为命令参数输入。
+
+### 上下文压缩
+
+上下文写满时，Pi 会对对话生成摘要。该请求由 Pi 内部构造，**不经过**常规钩子，因此本扩展会先对 Pi 即将摘要的对话脱敏，再由 Pi 用你当前的模型生成摘要。不需要第二个模型；保存下来的摘要保留假值，因此会话文件中不会写入明文摘要。
+
+| `compaction` | 行为 |
+| --- | --- |
+| `ask`（默认） | 每次压缩前询问，然后脱敏 |
 | `protected` | 不询问，直接脱敏 |
-| `off` | 始终拒绝；长会话请使用 `/new` |
+| `off` | 从不压缩；请改用 `/new` |
 
 ```json
-{
-  "version": 1,
-  "compaction": "protected",
-  "sensitiveWords": []
-}
+{ "version": 1, "compaction": "protected", "sensitiveWords": [] }
 ```
 
-弹窗提供四个选项：允许一次、本会话内全部允许、拒绝一次、本会话内全部拒绝。会话级选择在重载或退出前有效；配置中的 `compaction` 才是永久设置。关闭对话框视为拒绝本次压缩。
+"本会话内全部允许"在重载或退出前有效；配置中的取值才是永久设置。若脱敏失败，压缩会被取消，而不是让 Pi 发送原文。
 
-`compaction.provider`、`compaction.model`、`compaction.contextWindow` 与 `compaction.reserveTokens` 在 0.11.0 之前用于选择独立的摘要模型。它们仍被接收，以免升级后拦住可用环境，但已不起任何作用并会在启动时提示，请删除。
+一个例外：`/compact <指令>` 的指令由 Pi 从自身状态读取，本扩展无法触及。若指令中含受保护值，该次压缩会被取消（`COMPACT_INSTRUCTIONS`）——请不带该值执行 `/compact`。自动压缩与 `/tree` 摘要不受影响。
 
-模型推理的仍是替换值，因此摘要对受保护值的描述可能不准确，保存下来的摘要显示的也是替换值而非原值。
-
-带摘要的 `/tree` 导航走 Pi 同一条内部路径，以相同方式保护，并共用同一设置与弹窗。不带摘要的导航不发送任何内容，也不会被询问。
-### 多轮一致性与提示词缓存
-
-随机占位符按精确原文首次生成，在同一扩展实例内持续复用，包括本地回复还原后的再次脱敏；新建扫描 worker 不会重置映射。这有助于前缀稳定，但不保证提供商 KV Cache 命中，模型、工具、消息顺序、缓存有效期和路由也有影响。重载、进程重启和会话实例替换会清除映射；不同进程不共享映射，审计时间和请求 ID 不进入模型请求体。
+`compaction.provider`、`compaction.model`、`compaction.contextWindow` 与 `compaction.reserveTokens` 在 0.11.0 之前用于配置独立的摘要模型。它们仍被接收，以免升级后破坏可用环境，但已不起作用，请删除。
 
 ## 私有审计日志
 
-成功脱敏的请求会追加记录到配置旁的 `protecter.<machineHash>.jsonl`。每行包含 `time`（本地时间 `yyyy-mm-dd HH:mm:ss`）、`timezoneOffset`（相对 UTC 向东的分钟数）、`provider`、`original`、`replacement`、`requestId` 和 `version`。供应商为 Pi 当前选择的 provider ID，不猜测网关背后的上游厂商；无法获取时记录 `unknown`。
+每次成功脱敏都会追加到配置旁的 `protecter.<machineHash>.jsonl`：时间、provider、原值、假值与请求 ID。
 
-每次成功扫描，对不同的原文与占位符组合分别记录一行，同一请求内重复出现会去重。后续请求再次替换同一原文时仍新增记录，即使复用占位符。已有占位符和无命中请求不新增记录。日志表示**本地脱敏事件，而非网络已成功发送**，之后仍可能取消、被其他钩子修改或发生提供商错误。
+**该文件包含你的真实秘密以及还原映射。** 它以 `0600` 权限创建，不会被上传，也未加密。请勿分享。`/protecter logs` 仅限本地 TUI，展示明文前需确认；RPC 与 print 模式从不显示。
 
-`/protecter` 或 `/protecter logs [1-100]` 查看最近记录，默认 20 条。仅在本地 TUI 可用：先选择时间及供应商条目，确认后才显示明文。编辑器只作预览，修改不保存；控制字符转义，过长预览截断。RPC、打印模式不展示秘密，命令不调用消息发送接口，也不写入会话条目。
+一条记录代表"已在本地替换"，不代表"已送达提供商"。`/protecter logs clear` 在确认后清空本机日志——这是逻辑删除，而非安全擦除。日志写满、被锁定或不可写时，命中请求会被拦截，而不是静默丢失审计记录。
 
-使用 `/protecter logs clear` 只清空当前机器的审计日志。必须在本地 TUI 确认；取消、RPC／打印模式或多余参数均不执行。确认后等待 Pi 空闲，与扫描排队并获取和追加日志相同的跨进程锁；安全验证后截断文件并同步，不删除文件，日志不存在则成功无操作。不改变配置、其他机器日志或内存映射；新请求可能立即新增记录。可清理已满或尾部残缺日志，但不绕过危险链接、占用锁或残留锁。这是不可撤销的逻辑删除，**不等于安全擦除**文件系统快照或备份。
+## 请求被拦截时
 
-**日志包含真实秘密及可逆映射。** Unix 权限为 0600，拒绝符号链接、硬链接及他人文件。工具防护覆盖当前和旧机器哈希日志及别名，但不是沙箱。日志不加密、不自动轮转、不随配置迁移，也不用于恢复映射。请停止全部 Pi 进程后再本地归档、删除日志或检查残留 `.jsonl.lock`。读取限最后 1 MiB、最多 100 条，每条预览最多 20,000 字符；单日志上限 32 MiB、请求批次 8 MiB。日志满、不可写、尾部残缺或锁占用时，命中请求会被阻止，不静默漏记。扫描失败不新增记录，硬崩溃可能遗留部分批次，需本地修复。
-
-## 拦截原因定位
-
-请求被拦截时，提示不再是单一笼统信息，而是给出失败阶段、稳定错误码和处理建议：
+被拦截的请求一律拒绝放行：出站内容被替换为 `{}`，并给出错误码与处理建议。
 
 ```text
-SPI Protecter 已阻止该请求
+SPI Protecter blocked this request
 code=CONFIG_EMPTY_MATCH stage=configuration rule=1
-原因：正则匹配空字符串
-处理：修改指定规则，要求非空匹配
-详情：/protecter status
+Reason: Regex matches an empty string
+Action: Require a non-empty match in the numbered rule
+Details: /protecter status
 ```
 
-阶段包括初始化、配置、迁移、请求、扇描、worker、审计和内部错误。定位信息仅在已知时输出：`rule` 和 `otherRule` 是敏感词数组中从 1 开始的序号，`node` 为已扫描节点数，`bytes`、`limit`、`timeoutMs` 说明超限情况，`errno` 为系统错误码。
+`rule=1` 是 `sensitiveWords` 中从 1 开始的序号。阶段包括 `initialization`、`configuration`、`migration`、`request`、`scan`、`worker`、`audit` 与 `internal`。通知会滚动消失，可用 `/protecter status` 重新查看最近一次。
 
-常见错误码包括 `CONFIG_JSON`、`CONFIG_SCHEMA`、`CONFIG_REGEX`、`CONFIG_TARGET`、`CONFIG_CONFLICT`、`CONFIG_EMPTY_MATCH`、`CONFIG_SENSITIVE_TARGET`、`CONFIG_ALIAS_CONFLICT`、`CONFIG_UNSAFE`、`MIGRATION_LOCKED`、`MIGRATION_CHANGED`、`PAYLOAD_JSON`、`PAYLOAD_SIZE`、`SCAN_TIMEOUT`、`SCAN_MATCH_LIMIT`、`SCAN_COMPLEXITY`、`SCAN_ATTACHMENT`、`SCAN_JSON_REWRITE`、`SCAN_NUMBER_UNSAFE`、`SCAN_UNIQUE_FAILED`、`FIXED_OVERLAP`、`FIXED_ALIAS_REUSED`、`AUDIT_FULL`、`AUDIT_PARTIAL`、`AUDIT_LOCKED`、`AUDIT_UNSAFE` 和 `WORKER_FAILED`。
-
-通知可能消失，因此 `/protecter status` 会重新展示本会话最近一次拦截；防护不可用时被拦截的工具也会报告同一原因。请求仍然失败不放行：出站请求体会被替换为 `{}`。
-
-**诊断信息不包含请求文本、命中原文、替换值、配置内容、文件路径或原始系统消息。** 仅输出目录内错误码、非负整数定位和白名单 `errno`，因此可安全粘贴到问题报告。也因为不包含命中内容，最终定位问题规则时，仍需根据规则序号在本地查看。
+**诊断信息从不包含请求文本、命中原值、假值、配置内容、文件路径或原始系统消息**——只有错误码、数字和白名单内的 `errno`，因此可以安全粘贴到 issue；相应地，定位具体规则可能仍需在本地查看。
 
 ## 工作方式
 
 ```text
-输入／历史／工具结果／系统提示／工具定义
-                         ↓
-before_provider_request：最终 JSON 文本扫描
-                         ↓
-同形随机值 → LLM 网关
-                         ↓
-本地回复和工具参数还原
+你的输入／历史／工具定义／工具结果
+              ↓
+   扫描最终请求 JSON，替换命中内容
+              ↓
+         假值 → 模型提供商
+              ↓
+     在回复与工具参数中还原真实值
 ```
 
-1. 扫描 JSON 字符串、键和数字，包括解码后的 JSON 字符串工具参数；不修改本地用户输入和历史原文。
-2. 使用 `crypto.randomBytes` 生成同形替换值。运行时映射保存在内存，不跨重启恢复。**从 0.3.0 起，成功替换的原文和占位符也会持久化到私有审计日志。** 不注入配置、会话自定义条目或模型提示。
-3. 还原最终 assistant 文本、思考内容和工具参数。TUI 在完整占位符到达后还原，片段可能短暂显示；RPC/JSON 增量仍脱敏，直到最终消息还原。被改写或截断的占位符无法还原。
-4. 工具执行前还原参数，让合法本地操作使用原值；后续请求再次脱敏。**凭证还原不等于工具授权或防外传。**
-5. 正则扫描运行于可终止 worker。失败时返回 `{}` 并请求取消，不依赖被 Pi 吞掉的钩子异常；仍可能产生空请求或提供商校验错误，但处理器不返回原始请求体。
+1. 扫描最终请求 JSON——字符串、键、数字以及 JSON 编码的工具参数。你的本地输入与历史不会被修改。
+2. 用 `crypto.randomBytes` 生成假值。映射保存在内存中；同一会话内同一个值始终对应同一个假值，这也使提示前缀保持稳定。
+3. 在完成的回复、思考块以及工具执行前的参数中还原真实值，使本地工具基于真实数据工作。
+4. 你的正则在 worker 中执行，限时 2 秒。任何失败都发送 `{}` 并取消请求，而不是回退到原始请求。
 
-### 配置访问防护
+`/reload`、重启或切换会话会清空映射；此后旧摘要中的假值将无法再被还原。
 
-**以出站脱敏为主，直接访问拦截为辅。** 不全面禁用 shell。
+本扩展还会阻止工具读取它自己的配置与审计日志，并会解析 `~`、`@`、相对路径、`file://` 与符号链接。这是便利性防护，不是沙箱：shell 与第三方工具可以绕过。
 
-- 文件工具检查实际路径参数而非正文，允许文档提及配置名称。当前配置目录内的旧名称、哈希名称及迁移文件受保护；shell 命令字段保留尽力文件名检查，因此 shell 提及名称仍可能误拦截。
-- 解析 `@`、`~`、相对路径和 `file://`，检查符号链接和 inode 别名；阻止 `grep/find/ls` 扫描包含配置的祖先目录。
-- 完整原始配置意外出现在请求文本时，尝试整体替换。
-- **仅为尽力防护：**动态 shell、编码、拆分输出、目录内链接、任意第三方工具和网络发送可绕过检查，无法保证恶意模型永远无法取得配置。
-
-## 当前限制——请先阅读
-
-- 仅保护命中规则的文本，不覆盖改写、拆字和任意编码。常见多模态附件因无法可靠审查而拒绝整个请求，不提供 OCR。
-- 压缩与带摘要的 `/tree` 导航改为对 Pi 即将摘要的内容原地脱敏（Pi 在内部构造这些请求，不经过 `before_provider_request`），随后由 Pi 用会话自身的模型对脱敏文本生成摘要。不带摘要的导航不发送任何内容。Pi 其余无钩子的模型调用（`/bug` 摘要、`codemode` 与其他扩展的嵌套调用）由模型运行时闸门覆盖。参见[上下文压缩与所有无钩子路径](#上下文压缩与所有无钩子路径)。
-- 退出、重载和切换会话会丢弃映射。最终已还原消息仍可读，但崩溃残留、旧摘要和原始增量无法跨重启恢复占位符。
-- 过宽规则可能改写协议字段、模型名、工具结构和 ID，导致请求失败；命中数字变为占位符字符串，应优先使用精确规则。
-- 复用占位符会暴露值相等的关系，上下文也可能揭示身份，这不是形式化匿名化。
-- 模型调用已覆盖，但非模型调用的传输不在覆盖范围：`/bug` 上传的报告包、`/share` 与 `/export` 通过各自的 HTTP 路径发送已保存的会话记录，任何扩展 API 都无法拦截，而会话记录中保存的是已还原的明文。钩子同样不覆盖认证头、API key、网关地址、遥测、扩展自身的 `fetch`，以及工具联网（含交给 MCP 服务器的参数）；网关仍收到其认证凭证。请把 `/bug`、`/share`、`/export` 视为明文披露，使用前先检查其内容。
-- **在其他请求改写扩展之后加载，并只使用可信扩展。** 后续处理器可重新加入原文；扩展有本机权限，插件加载失败时 Pi 可能继续运行，请先检查状态再输入秘密。
-- 本地会话、终端、导出和工具写出的文件可能包含明文，本项目不加密或清理它们。
-
-详细威胁模型见 [SECURITY.md](SECURITY.md)。
-
-## 开发与验证
+## 开发与调试
 
 ```bash
 npm ci
+npm run check        # 构建 + 类型检查 + 全部测试
+npm run typecheck    # 仅类型检查
+npm test             # 仅测试（同时会重新构建 dist/）
+npm run build        # 打包并压缩到 dist/
+```
+
+请使用**一次性**的 Pi 配置目录从源码运行，绝不要用你的真实目录：
+
+```bash
+export PI_CODING_AGENT_DIR="$(mktemp -d)"
+export PI_PROTECTER_LANG=en          # 固定消息语言
+pi -e ./src/index.ts
+```
+
+把虚构规则写入 `$PI_CODING_AGENT_DIR/protecter.json` 后启动 Pi，首次运行会据此创建机器哈希配置。
+
+### 代码位置
+
+| 路径 | 作用 |
+| --- | --- |
+| `src/index.ts` | 钩子与命令接线：出站请求、还原、工具调用、压缩、启动检查 |
+| `src/engine.ts` | 脱敏／还原编排、映射表、worker 生命周期、审计写入 |
+| `src/scan-worker.mjs` | 在可终止的 worker 中执行你的正则 |
+| `src/shape.mjs` | 生成同形态的假值 |
+| `src/compaction.ts` | 对 Pi 即将摘要的内容脱敏（压缩与 `/tree`） |
+| `src/guard-runtime.ts` | 针对无钩子调用的模型运行时总闸门 |
+| `src/config.ts`、`src/migration.ts` | 解析、校验、机器哈希配置迁移 |
+| `src/guard.ts` | 阻止工具访问配置与审计日志 |
+| `src/diagnostics.ts`、`src/locale.ts` | 错误码、阶段与双语文案 |
+| `src/compat.ts` | 已验证的 Pi 版本门禁 |
+
+### 调试流程
+
+- **只跑一个测试文件：** `npx tsx --test test/guard-runtime.test.ts`。
+- **把问题复现成测试，而不是打到真实网关。** `test/integration.test.ts` 驱动 Pi 真实的加载器与执行器，并对实际出站内容做断言；复制其中一个用例并换成虚构值即可。绝不要用真实秘密或真实提供商测试。
+- **确认到底发出了什么。** 审计日志记录每一对原值／假值，`/protecter status` 会重新展示最近一次拦截及其错误码与阶段。诊断有意不含内容，因此规则序号就是指回你配置的线索。
+- **无钩子路径**由 `test/hookless-paths.test.ts`（经真实执行器验证压缩与 `/tree`）和 `test/guard-runtime.test.ts`（模型运行时闸门，并直接对 Pi 自身的类做断言，使 Pi 重命名会导致测试失败而非静默丢掉覆盖）覆盖。
+- **打包产物同样在测试内。** `npm test` 会构建真实的 npm tarball、解压，并用 Pi 的加载器加载 `dist/index.mjs` 及两个 worker，因此压缩与 worker 路径是被验证过的，而非假设。
+
+### 扩大 Pi 兼容范围
+
+`src/compat.ts` 会拒绝任何未经验证的 Pi 版本，因为此处判断失误意味着发送明文，而不仅是功能失效。要新增一个版本，请安装它并在其上运行完整测试：
+
+```bash
+npm i -D @earendil-works/pi-coding-agent@<版本>
 npm run check
 ```
 
-测试仅使用临时目录和虚构敏感值，不读取真实配置、不使用真实密钥或访问 LLM 网关，覆盖脱敏还原、正则超时、权限、路径防护和真实 Pi 加载器／执行器集成。所有 Markdown、注释和新提交信息必须使用英文＋简体中文。
+通过之后再更新 `supportsPi`、`SUPPORTED_PI` 与 `peerDependencies`，并保持运行时门禁与声明范围完全一致。
 
-`npm run build` 使用 esbuild 合并本地模块、移除类型并压缩产物，Node 内置模块和 Pi peer 依赖保持外部引用。不发布源码或 source map，源码仍可在 GitHub 查阅。压缩是体积优化，不是加密或安全隔离。`npm pack` 通过 `prepack` 自动构建，`npm publish` 先执行检查。测试还会解压实际 npm 压缩包，用 Pi 加载器和两个 worker 验证产物。详见仓库内的 `docs/BUILDING.md`。
+更多资料：双语与评审规范见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，打包见 [`docs/BUILDING.md`](docs/BUILDING.md)，发布见 [`docs/RELEASING.md`](docs/RELEASING.md)，威胁模型见 [`SECURITY.md`](SECURITY.md)，版本变更见 [`CHANGELOG.md`](CHANGELOG.md)。
 
-接口依据为 [Pi 官方扩展文档](https://pi.dev/docs/latest/extensions)、本机 0.86.1 文档及执行器实现；采用 MIT 许可证。
+## 消息与语言
+
+消息只使用一种语言，依次取自 `PI_PROTECTER_LANG`、`LC_ALL`、`LC_MESSAGES`、`LANG`、`LANGUAGE`，最后是运行时语言。`zh*` 选择简体中文，其余为英文。错误码与数字与语言无关。
+
+本项目基于 MIT 许可。
