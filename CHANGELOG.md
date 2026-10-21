@@ -1,5 +1,25 @@
 # Changelog / 更新日志
 
+## 0.11.1 — Documented IP rules, and a README that leads with coverage / 文档内的 IP 规则，以覆盖范围开篇的 README
+
+### Added / 新增
+
+- Add IPv4 and IPv6 rules to the README configuration example. IPv6 needs two patterns, because the `::`-compressed form is a different shape from the full one. The patterns are the ones already shipped in `protecter.example.json`.
+  在 README 的配置示例中加入 IPv4 与 IPv6 规则。IPv6 需要两条正则，因为 `::` 压缩形式与完整形式的形态不同。所用正则与 `protecter.example.json` 中随包发布的一致。
+- Test the README examples the way the shipped example file is tested: every documented configuration must load through the extension's own parser, and the documented address rules must produce addresses that `net.isIPv4`/`net.isIPv6` still accept, keep the compressed IPv6 shape, and round-trip on restoration. A documented rule that does not work is now a test failure.
+  像对待随包示例文件那样测试 README 示例：文档中的每份配置都必须能通过本扩展自己的解析器加载，文档中的地址规则必须产出 `net.isIPv4`/`net.isIPv6` 仍然接受的地址、保持 IPv6 压缩形态，并在还原时精确往返。文档里不能用的规则现在会导致测试失败。
+
+### Changed / 变更
+
+- Restructure the README around two questions: what is redacted and what is not, then how to develop and debug. The coverage answer comes first, before installation, as two tables — every model request and how it is covered, and every transfer that is not a model request, with `/bug`, `/share`, `/export`, tools, MCP servers, shell, request headers and session files named explicitly together with the reason no extension can intercept them.
+  围绕两个问题重构 README：哪些会脖敏、哪些不会，以及如何开发与调试。覆盖范围的答案置于安装之前，以两张表格呈现——所有模型请求及其覆盖方式，以及所有不属于模型请求的传输，并明确点出 `/bug`、`/share`、`/export`、工具、MCP 服务器、shell、请求头与会话文件，连带任何扩展都无法拦截的原因。
+- Add a development and debugging section: the commands, running from source against a throwaway `PI_CODING_AGENT_DIR`, a map of `src/`, how to reproduce a block as a test instead of against a live gateway, which tests cover the hookless paths and the packed tarball, and how to widen the Pi version gate.
+  新增开发与调试章节：常用命令、使用一次性 `PI_CODING_AGENT_DIR` 从源码运行、`src/` 代码位置一览、把问题复现成测试而不是打到真实网关、哪些测试覆盖无钩子路径与打包产物，以及如何扩大 Pi 版本门禁。
+- Pin the `@earendil-works/pi-coding-agent` development dependency to an exact version again. 0.11.0 recorded `^1.3.0`, so a fresh clone could install a Pi release the runtime gate refuses, which fails every test for a reason that has nothing to do with the change under test.
+  将 `@earendil-works/pi-coding-agent` 开发依赖重新固定为精确版本。0.11.0 记录的是 `^1.3.0`，全新克隆可能装到运行时门禁拒绝的 Pi 版本，导致所有测试因与待测改动无关的原因失败。
+- Cut implementation detail that belongs in `SECURITY.md` and this changelog (hook names, worker internals, long code lists), and drop the pinned-version install example, which drifted behind every release. The README is 53.6 KB to 31.5 KB with both languages mirrored section for section.
+  删去应留在 `SECURITY.md` 与本更新日志的实现细节（钩子名称、worker 内部、冗长的错误码清单），并移除每次发布都会落后的固定版本安装示例。README 从 53.6 KB 精简至 31.5 KB，两种语言逐节对应。
+
 ## 0.11.0 — Pi summarizes again, and every hookless path is covered / 摘要交回 Pi，并覆盖所有无钩子路径
 
 ### Changed / 变更

@@ -70,7 +70,10 @@ The configuration lives at `~/.pi/agent/protecter.<machineHash>.json` (it follow
     "Alex Morgan",
     { "type": "literal", "value": "your-private-password" },
     { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
-    { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" }
+    { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" },
+    { "type": "regex", "pattern": "(?<![\\w.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?![\\w.])" },
+    { "type": "regex", "pattern": "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\\w:.])" },
+    { "type": "regex", "pattern": "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){1,6}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,5})?(?![\\w:.])" }
   ]
 }
 ```
@@ -81,6 +84,8 @@ The configuration lives at `~/.pi/agent/protecter.<machineHash>.json` (it follow
 | `{ "type": "literal", "value": "..." }` | Same, with options |
 | `{ "type": "regex", "pattern": "..." }` | JavaScript regex; the whole match is replaced |
 | `"replacement": "..."` | Always use this fixed fake value instead of a random one |
+
+The last four rules are a phone number, an IPv4 address, a full IPv6 address and a `::`-compressed IPv6 address. IPv6 needs both patterns because the compressed form is a different shape. Matched addresses are replaced by **valid** addresses, so tools and provider validators still accept them.
 
 Tips that matter in practice:
 
@@ -328,7 +333,10 @@ pi update npm:pi-information-protecter
     "Alex Morgan",
     { "type": "literal", "value": "your-private-password" },
     { "type": "literal", "value": "Apple Inc.", "replacement": "Alphabet Inc." },
-    { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" }
+    { "type": "regex", "pattern": "(?<!\\d)1[3-9]\\d{9}(?!\\d)" },
+    { "type": "regex", "pattern": "(?<![\\w.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?![\\w.])" },
+    { "type": "regex", "pattern": "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}(?![\\w:.])" },
+    { "type": "regex", "pattern": "(?<![\\w:.])(?:[0-9A-Fa-f]{1,4}:){1,6}:(?:[0-9A-Fa-f]{1,4}(?::[0-9A-Fa-f]{1,4}){0,5})?(?![\\w:.])" }
   ]
 }
 ```
@@ -339,6 +347,8 @@ pi update npm:pi-information-protecter
 | `{ "type": "literal", "value": "..." }` | 同上，可带选项 |
 | `{ "type": "regex", "pattern": "..." }` | JavaScript 正则，整个匹配被替换 |
 | `"replacement": "..."` | 固定使用该假值，而非随机值 |
+
+最后四条规则分别匹配手机号、IPv4 地址、完整形式的 IPv6 地址，以及 `::` 压缩形式的 IPv6 地址。IPv6 需要两条规则，因为压缩形式的形态不同。命中的地址会被替换成**合法**地址，因此工具与提供商的校验仍能通过。
 
 实践中要紧的几点：
 
