@@ -54,6 +54,8 @@ const stages = {
   AUDIT_LOCKED: "audit",
   AUDIT_UNSAFE: "audit",
   AUDIT_IO: "audit",
+  TEST_INPUT: "test",
+  TEST_SIZE: "test",
 } as const;
 
 /** Exported so tests can assert every code has catalog text. / 导出以便测试断言每个错误码都有文案。 */

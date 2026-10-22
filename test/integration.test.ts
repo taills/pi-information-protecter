@@ -247,6 +247,25 @@ for (const mode of ["source", "packed"] as const) {
     assert.equal(token.length, "fake-private-password".length);
     assert.ok(!JSON.stringify(outgoing).includes("fake-private-password"));
 
+    // Offline test command: local text and local files are redacted with the
+    // same rules and the same mapping, and nothing reaches a provider.
+    // 离线测试命令：本地文本与本地文件使用相同规则和相同映射脱敏，且不发往提供商。
+    const demoPath = join(dir, "demo.txt");
+    writeFileSync(demoPath, "contact fake-private-password now");
+    await command.handler(`test @${demoPath}`, localCtx);
+    const filePreview = previews.at(-1)!;
+    assert.ok(!filePreview.includes("fake-private-password"));
+    assert.ok(filePreview.includes(token));
+    await command.handler("test Apple Inc. stays fixed", localCtx);
+    assert.ok(previews.at(-1)!.includes("Alphabet Inc."));
+    // A missing argument prints usage; an unreadable path reports TEST_INPUT.
+    // 缺少参数时提示用法；路径不可读时返回 TEST_INPUT。
+    const previewCount = previews.length;
+    await command.handler("test", localCtx);
+    await command.handler(`test @${join(dir, "missing.txt")}`, localCtx);
+    assert.equal(previews.length, previewCount);
+    assert.match(notices.at(-1)!, /code=TEST_INPUT/);
+
     // Pi's own summarizers, /bug and nested model calls reach the provider
     // through the model runtime with no payload hook and no extension event.
     // Pi 自身的摘要器、/bug 与嵌套模型调用经模型运行时发往提供商，

@@ -133,8 +133,17 @@ The reply quietly contradicts itself, looks confident, and does not change if yo
 | `/protecter logs [1-100]` | Open the local audit log viewer (default 20 records) |
 | `/protecter logs clear` | Empty this machine's audit log |
 | `/protecter reload` | Reload Pi once it is idle |
+| `/protecter test <text>` | Redact the text locally and show the result; nothing is sent to a model |
+| `/protecter test @<path>` | Same, with the content of a local text file (up to 256 KiB) |
 
-Never type a secret as a command argument.
+Never type a secret as a command argument — `test` is the one exception, because its input never leaves this machine.
+
+`test` runs the same rules, worker and mapping table as a real request: it writes an audit record and the replacements it learns stay in the session mapping, so later replies containing them are still restored. Use it to check a new rule offline before sending anything.
+
+```text
+/protecter test Call Alex Morgan at 13800138000
+/protecter test @./demo.txt
+```
 
 ### Context compaction
 
@@ -396,6 +405,17 @@ pi update npm:pi-information-protecter
 | `/protecter logs [1-100]` | 打开本地审计日志查看器（默认 20 条） |
 | `/protecter logs clear` | 清空本机审计日志 |
 | `/protecter reload` | 等待空闲后重载 Pi |
+| `/protecter test <文本>` | 在本地对文本脱敏并展示结果，不向模型发送内容 |
+| `/protecter test @<路径>` | 同上，输入为本地文本文件内容（上限 256 KiB） |
+
+除 `test` 外，不要在命令参数中输入敏感内容；`test` 的输入不会离开本机。
+
+`test` 与真实请求走同一套规则、worker 和映射表：会写入审计记录，且本次学到的替换关系保留在会话映射中，后续回复中出现该替换值仍可还原。可用它在发送任何内容前离线验证新规则。
+
+```text
+/protecter test 联系 Alex Morgan，电话 13800138000
+/protecter test @./demo.txt
+```
 
 不要把秘密作为命令参数输入。
 

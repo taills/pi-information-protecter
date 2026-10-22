@@ -17,6 +17,39 @@ import {
   type Diagnostic,
 } from "./diagnostics.ts";
 import { count, detectLocale, setLocale, t } from "./locale.ts";
+import { lstat, readFile } from "node:fs/promises";
+import { resolve } from "node:path";
+
+/** Offline test input: inline text, or @<path> for a local regular file. / 离线测试输入：行内文本，或用 @<路径> 指向本地普通文件。 */
+const TEST_INPUT_LIMIT = 256 * 1024;
+async function readTestInput(
+  argument: string,
+): Promise<{ text: string; fromFile: boolean }> {
+  const unquote = (value: string) =>
+    /^(['"]).*\1$/s.test(value) ? value.slice(1, -1) : value;
+  const value = unquote(argument);
+  if (!value.startsWith("@")) return { text: value, fromFile: false };
+  const path = resolve(unquote(value.slice(1).trim()));
+  let stats;
+  try {
+    // lstat, not stat: a symbolic link must not redirect the read.
+    // 使用 lstat 而非 stat：不允许符号链接改变读取目标。
+    stats = await lstat(path);
+  } catch (error) {
+    throw sanitizeError(error, "TEST_INPUT");
+  }
+  if (!stats.isFile()) throw failure("TEST_INPUT");
+  if (stats.size > TEST_INPUT_LIMIT)
+    throw failure("TEST_SIZE", {
+      bytes: stats.size,
+      limit: TEST_INPUT_LIMIT,
+    });
+  try {
+    return { text: await readFile(path, "utf8"), fromFile: true };
+  } catch (error) {
+    throw sanitizeError(error, "TEST_INPUT");
+  }
+}
 
 /**
  * Explicitly install this after other extensions that rewrite outgoing payloads.
@@ -268,8 +301,42 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   pi.registerCommand("protecter", {
     description: t("commandDescription"),
     handler: async (args, ctx) => {
-      const parts = args.trim().split(/\s+/).filter(Boolean);
+      const raw = args.trim();
+      const parts = raw.split(/\s+/).filter(Boolean);
       const action = parts[0] ?? "logs";
+      if (action === "test") {
+        // Offline check: redact local text or a local file and show the result.
+        // Nothing is sent to a model, so the output is safe to display anywhere.
+        // 离线自检：对本地文本或本地文件脱敏并展示结果。
+        // 全程不向模型发送内容，因此输出可在任何界面显示。
+        const argument = raw.slice(action.length).trim();
+        if (!argument) {
+          ctx.ui.notify(t("usage"), "info");
+          return;
+        }
+        try {
+          if (!engine.ready) throw failure("NOT_READY");
+          const { text: input, fromFile } = await readTestInput(argument);
+          const result = await engine.redact({ text: input }, "test");
+          const value = (result as { text?: unknown }).text;
+          if (typeof value !== "string") throw failure("INTERNAL");
+          const header = [
+            t(fromFile ? "testFileLabel" : "testTextLabel"),
+            t(value === input ? "testUnchanged" : "testRedacted", {
+              chars: count("chars", value.length),
+            }),
+          ].join("\n");
+          if (ctx.mode === "tui")
+            await ctx.ui.editor(t("testPreviewTitle"), `${header}\n\n${value}`);
+          else ctx.ui.notify(`${header}\n\n${value}`, "info");
+        } catch (error) {
+          ctx.ui.notify(
+            record(sanitizeError(error, "TEST_INPUT").diagnostic),
+            "error",
+          );
+        }
+        return;
+      }
       if (
         !["status", "reload", "logs"].includes(action) ||
         (action !== "logs" && parts.length > 1) ||

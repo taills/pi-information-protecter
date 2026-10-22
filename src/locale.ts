@@ -215,6 +215,14 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Audit file operation failed",
     "Check errno, permissions and free space; no path or content is exposed",
   ],
+  TEST_INPUT: [
+    "Cannot read the offline test input",
+    "Pass text, or @<path> pointing to a readable regular text file",
+  ],
+  TEST_SIZE: [
+    "Offline test input exceeds the size limit",
+    "Test a smaller file or a shorter excerpt",
+  ],
 };
 
 const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
@@ -339,6 +347,14 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
     "审计文件操作失败",
     "检查错误码、权限和磁盘空间，不暴露路径或内容",
   ],
+  TEST_INPUT: [
+    "无法读取离线测试输入",
+    "请直接传入文本，或用 @<路径> 指向可读的普通文本文件",
+  ],
+  TEST_SIZE: [
+    "离线测试输入超出大小上限",
+    "改用更小的文件或更短的片段",
+  ],
 };
 
 const UI_EN = {
@@ -358,7 +374,14 @@ const UI_EN = {
     "SPI Protecter: no rules configured; edit the local machine config, then /reload.",
   commandDescription: "View local SPI protection records",
   usage:
-    "Usage: /protecter [logs [1-100|clear]|status|reload]. Never type secrets as arguments.",
+    "Usage: /protecter [logs [1-100|clear]|status|reload|test <text>|test @<path>]. Only `test` takes content; never type secrets as other arguments.",
+  testPreviewTitle: "Offline redaction test; local only, edits are discarded",
+  testRedacted:
+    "SPI Protecter: redacted locally ({chars}); nothing was sent to a model. Replacements are now learned for this session.",
+  testUnchanged:
+    "SPI Protecter: no rule matched ({chars}); the text below is unchanged.",
+  testFileLabel: "Input: local file",
+  testTextLabel: "Input: inline text",
   logsTuiOnly: "Open the local TUI to view protection records.",
   logsNone: "No readable records.",
   logsSelectTitle: "Protection records",
@@ -430,7 +453,13 @@ const UI_ZH: Record<UiKey, string> = {
   emptyRules: "SPI Protecter：尚未配置规则，请编辑本地机器配置后重载。",
   commandDescription: "查看本地保护记录",
   usage:
-    "用法：/protecter [logs [1-100|clear]|status|reload]。不要在参数中输入敏感内容。",
+    "用法：/protecter [logs [1-100|clear]|status|reload|test <文本>|test @<路径>]。仅 test 接受内容，其他参数不要输入敏感内容。",
+  testPreviewTitle: "离线脱敏测试，仅本地显示，编辑不会保存",
+  testRedacted:
+    "SPI Protecter：已在本地脱敏（{chars}），未向任何模型发送内容。替换关系已记入本会话映射。",
+  testUnchanged: "SPI Protecter：没有规则命中（{chars}），下方文本未改动。",
+  testFileLabel: "输入：本地文件",
+  testTextLabel: "输入：行内文本",
   logsTuiOnly: "请在本地 TUI 查看保护记录。",
   logsNone: "暂无可读记录。",
   logsSelectTitle: "保护记录",
@@ -496,12 +525,14 @@ const COUNTS = {
     mappings: { one: "{n} mapping", other: "{n} mappings" },
     bytes: { one: "{n} byte", other: "{n} bytes" },
     tokens: { one: "{n} token", other: "{n} tokens" },
+    chars: { one: "{n} character", other: "{n} characters" },
   },
   zh: {
     rules: { other: "规则 {n} 条" },
     mappings: { other: "映射 {n} 个" },
     bytes: { other: "{n} 字节" },
     tokens: { other: "{n} token" },
+    chars: { other: "{n} 个字符" },
   },
 } as const;
 

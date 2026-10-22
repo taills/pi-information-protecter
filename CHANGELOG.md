@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.12.0 — Offline rule testing without a model / 无需模型的离线规则测试
+
+### Added / 新增
+
+- Add `/protecter test <text>` and `/protecter test @<path>`: redact local text or a local text file (up to 256 KiB) and show the result, without sending anything to a model. It runs the same rules, the same worker and the same mapping table as a real request, so a new rule can be verified offline; the run writes an audit record and the replacements it learns stay in the session mapping. The path is read with `lstat`, so a symbolic link cannot redirect the read, and unreadable or oversized input reports `TEST_INPUT`/`TEST_SIZE` instead of a raw path or message.
+  新增 `/protecter test <文本>` 与 `/protecter test @<路径>`：对本地文本或本地文本文件（上限 256 KiB）脱敏并展示结果，全程不向模型发送内容。它与真实请求走同一套规则、同一个 worker 和同一张映射表，因此可离线验证新规则；本次运行会写入审计记录，学到的替换关系也保留在会话映射中。路径使用 `lstat` 读取，符号链接无法改变读取目标；不可读或超大输入返回 `TEST_INPUT`/`TEST_SIZE`，而不暴露路径或原始消息。
+
 ## 0.11.1 — Documented IP rules, and a README that leads with coverage / 文档内的 IP 规则，以覆盖范围开篇的 README
 
 ### Added / 新增
