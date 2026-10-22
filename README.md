@@ -45,7 +45,11 @@ Two more limits worth knowing: only text matching your rules is protected — no
 
 ## Installation
 
-Requires Node.js 22+ and Pi (`@earendil-works/pi-coding-agent`) **0.84.0–0.84.x, 0.85.1–0.87.x, 0.99.x or 1.2.0–1.3.x**. Every version in that list was verified by running the full test suite against it; others are refused on purpose, because a wrong guess here means sending plaintext.
+Requires Node.js 22+ and Pi (`@earendil-works/pi-coding-agent`) **0.84.0 or newer**. There is no version allowlist: at session start the extension probes the capabilities it protects with — `pi.on()`, `pi.registerCommand()`, `pi.registerMarkdownTransformer()`, `ctx.abort()`, `ctx.ui.notify()`, `ctx.ui.setStatus()` and `ctx.modelRegistry` — and refuses to run only when one is missing, naming it and pointing at [the issue tracker](https://github.com/taills/pi-information-protecter/issues/new). So a Pi upgrade keeps working, and a Pi that changed something this extension needs blocks requests instead of sending plaintext.
+
+On top of that, every model call Pi routes through its own request hook is verified per call: the runtime guard counts this extension's hook runs around Pi's `onPayload`, and redacts the payload itself if that hook did not run. A renamed or removed hook therefore cannot turn into a silent leak.
+
+**0.84.0–0.84.x, 0.85.1–0.87.x, 0.99.x and 1.2.0–1.4.x** have been verified by running the full test suite against them. A newer Pi is not refused; it reports once that it is beyond the verified set. Pi 0.85.0, 1.0.x and 1.1.0 fail to load Pi itself (an unresolvable internal import), so they are excluded from the declared peer range.
 
 ```bash
 # Install the latest release.
@@ -243,7 +247,7 @@ Write fictional rules into `$PI_CODING_AGENT_DIR/protecter.json`, start Pi, and 
 | `src/config.ts`, `src/migration.ts` | Parsing, validation, machine-hash configuration migration |
 | `src/guard.ts` | Blocks tool access to the configuration and audit log |
 | `src/diagnostics.ts`, `src/locale.ts` | Error codes, stages and bilingual messages |
-| `src/compat.ts` | The verified Pi version gate |
+| `src/compat.ts` | The capability probe and the verified-release list |
 
 ### Debugging workflow
 
@@ -255,14 +259,14 @@ Write fictional rules into `$PI_CODING_AGENT_DIR/protecter.json`, start Pi, and 
 
 ### Widening Pi compatibility
 
-`src/compat.ts` refuses any Pi release that has not been verified, because a wrong guess means sending plaintext rather than breaking a feature. To add a release, install it and run the full suite against it:
+`src/compat.ts` holds the capability probe and the suite-verified list. The probe is the gate; the list only decides whether the "newer than verified" notice appears. To verify a new release, install it and run the full suite against it:
 
 ```bash
 npm i -D @earendil-works/pi-coding-agent@<version>
 npm run check
 ```
 
-Only then update `supportsPi`, `SUPPORTED_PI` and `peerDependencies`, keeping the runtime gate and the declared range identical.
+Only then widen `isVerified` and `VERIFIED_PI`. Add a capability to `missingCapabilities` only when its absence would send plaintext: anything that merely degrades `/protecter` must not block protection.
 
 More detail: [`CONTRIBUTING.md`](CONTRIBUTING.md) for the bilingual and review rules, [`docs/BUILDING.md`](docs/BUILDING.md) for packaging, [`docs/RELEASING.md`](docs/RELEASING.md) for publishing, [`SECURITY.md`](SECURITY.md) for the threat model, [`CHANGELOG.md`](CHANGELOG.md) for version history.
 
@@ -317,7 +321,11 @@ Pi 没有为后三者提供任何钩子，因此本扩展包装会话共享的�
 
 ## 安装
 
-要求 Node.js 22+ 与 Pi（`@earendil-works/pi-coding-agent`）**0.84.0–0.84.x、0.85.1–0.87.x、0.99.x 或 1.2.0–1.3.x**。清单中的每个版本都经过完整测试验证；其余版本会被有意拒绝——此处判断失误意味着发送明文。
+要求 Node.js 22+ 与 Pi（`@earendil-works/pi-coding-agent`）**0.84.0 或更高**。不再使用版本白名单：会话启动时扩展会探测所依赖的能力——`pi.on()`、`pi.registerCommand()`、`pi.registerMarkdownTransformer()`、`ctx.abort()`、`ctx.ui.notify()`、`ctx.ui.setStatus()` 与 `ctx.modelRegistry`——仅在某项缺失时拖绝运行，并明确列出该能力与[问题反馈地址](https://github.com/taills/pi-information-protecter/issues/new)。因此 Pi 升级后仍可正常使用，而一旦 Pi 改动了本扩展所需的东西，会拦截请求而不是发送明文。
+
+在此之上，所有由 Pi 自身请求钩子转发的模型调用都会逐次校验：运行时闸门在 Pi 的 `onPayload` 前后统计本扩展钩子的执行次数，若未执行则由闸门自行脱敏。因此钩子被改名或移除也不会变成静默泄露。
+
+**0.84.0–0.84.x、0.85.1–0.87.x、0.99.x 与 1.2.0–1.4.x** 已通过完整测试验证。更高版本不会被拒绝，只会提示一次已超出已验证范围。Pi 0.85.0、1.0.x 与 1.1.0 会因无法解析的内部引用而导致 Pi 自身加载失败，因此被排除在声明的 peer 范围外。
 
 ```bash
 # 安装最新版本。
@@ -517,7 +525,7 @@ pi -e ./src/index.ts
 | `src/config.ts`、`src/migration.ts` | 解析、校验、机器哈希配置迁移 |
 | `src/guard.ts` | 阻止工具访问配置与审计日志 |
 | `src/diagnostics.ts`、`src/locale.ts` | 错误码、阶段与双语文案 |
-| `src/compat.ts` | 已验证的 Pi 版本门禁 |
+| `src/compat.ts` | 能力探测与已验证版本清单 |
 
 ### 调试流程
 
@@ -529,14 +537,14 @@ pi -e ./src/index.ts
 
 ### 扩大 Pi 兼容范围
 
-`src/compat.ts` 会拒绝任何未经验证的 Pi 版本，因为此处判断失误意味着发送明文，而不仅是功能失效。要新增一个版本，请安装它并在其上运行完整测试：
+`src/compat.ts` 存放能力探测与已验证版本清单。门禁是能力探测，清单只决定是否出现“超出已验证范围”的提示。要验证一个新版本，请安装它并在其上运行完整测试：
 
 ```bash
 npm i -D @earendil-works/pi-coding-agent@<版本>
 npm run check
 ```
 
-通过之后再更新 `supportsPi`、`SUPPORTED_PI` 与 `peerDependencies`，并保持运行时门禁与声明范围完全一致。
+通过之后再扩宽 `isVerified` 与 `VERIFIED_PI`。只有当某项能力缺失会导致发送明文时，才把它加入 `missingCapabilities`；仅削弱 `/protecter` 的能力不得拦截保护。
 
 更多资料：双语与评审规范见 [`CONTRIBUTING.md`](CONTRIBUTING.md)，打包见 [`docs/BUILDING.md`](docs/BUILDING.md)，发布见 [`docs/RELEASING.md`](docs/RELEASING.md)，威胁模型见 [`SECURITY.md`](SECURITY.md)，版本变更见 [`CHANGELOG.md`](CHANGELOG.md)。
 

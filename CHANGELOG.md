@@ -1,5 +1,23 @@
 # Changelog / 更新日志
 
+## 0.13.0 — Capabilities, not a version allowlist / 以能力为准，而非版本白名单
+
+### Changed / 变更
+
+- Replace the Pi version allowlist with a capability probe. At session start the extension checks what this Pi build actually exposes — `pi.on()`, `pi.registerCommand()`, `pi.registerMarkdownTransformer()`, `ctx.abort()`, `ctx.ui.notify()`, `ctx.ui.setStatus()` and `ctx.modelRegistry` — and only a missing capability stops it. The block names the missing capability and points at `https://github.com/taills/pi-information-protecter/issues/new`, because a user cannot fix Pi internals and a report is the only useful action. A Pi upgrade therefore keeps working instead of disabling protection on the day Pi releases a new minor.
+  将 Pi 版本白名单改为能力探测。会话启动时检查当前 Pi 构建实际暴露的能力——`pi.on()`、`pi.registerCommand()`、`pi.registerMarkdownTransformer()`、`ctx.abort()`、`ctx.ui.notify()`、`ctx.ui.setStatus()` 与 `ctx.modelRegistry`——仅在能力缺失时停止运行。拦截时会列出缺失的能力并给出 `https://github.com/taills/pi-information-protecter/issues/new`，因为用户无法修改 Pi 内部实现，反馈是唯一有用的处理。因此 Pi 升级后扩展仍可用，不再一发新次版本就停止保护。
+- Only capabilities whose absence would send plaintext can block. `waitForIdle`, `reload`, `ctx.ui.select`, `confirm` and `editor` belong to command interaction: missing ones degrade `/protecter`, so they no longer stop redaction.
+  只有缺失会导致发送明文的能力才会拦截。`waitForIdle`、`reload`、`ctx.ui.select`、`confirm` 与 `editor` 属于命令交互，缺失只会削弱 `/protecter`，不再停止脱敏。
+- Widen the declared peer range to `>=0.84.0` (excluding 0.85.0, 1.0.x and 1.1.0, which fail to load Pi itself). The diagnostic code `UNSUPPORTED_PI` becomes `PI_CAPABILITY`.
+  将声明的 peer 范围扩宽为 `>=0.84.0`（排除自身无法加载的 0.85.0、1.0.x 与 1.1.0）。诊断码 `UNSUPPORTED_PI` 改为 `PI_CAPABILITY`。
+
+### Added / 新增
+
+- Verify the request hook per call. Payload-carrying calls are passed through because `before_provider_request` redacts them and `stream`/`streamSimple` must stay synchronous — an assumption no version check could confirm. The runtime guard now wraps Pi's awaited `onPayload` and counts this extension's own hook runs around it; if the hook did not run, the guard redacts that payload itself and reports it once. A renamed, reordered or removed hook can no longer become a silent plaintext leak, which is what makes dropping the allowlist safe.
+  逐次校验请求钩子。带 payload 钩子的调用之前直通，是因为 `before_provider_request` 会对其脱敏且 `stream`/`streamSimple` 必须保持同步——这是任何版本检查都无法证实的假设。现在运行时闸门会包装 Pi 所 await 的 `onPayload`，并在其前后统计本扩展钩子的执行次数；钩子未执行时由闸门自行脱敏并提示一次。钩子被改名、调序或移除不再可能变成静默的明文泄露，这正是可以去掉白名单的前提。
+- Verify Pi 1.4.0 with the full suite and announce, once per session, any release beyond the verified set (`0.84.0-0.84.x, 0.85.1-0.87.x, 0.99.x, 1.2.0-1.4.x`) instead of refusing it.
+  对 Pi 1.4.0 运行完整测试验证；超出已验证集合（`0.84.0-0.84.x、0.85.1-0.87.x、0.99.x、1.2.0-1.4.x`）的版本不再被拒绝，每会话提示一次。
+
 ## 0.12.0 — Offline rule testing without a model / 无需模型的离线规则测试
 
 ### Added / 新增

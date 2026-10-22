@@ -2,7 +2,7 @@
  * Single-language messages chosen from the environment locale.
  * 根据环境语言选择单一语言的提示文案。
  */
-import { SUPPORTED_PI } from "./compat.ts";
+import { ISSUE_URL, VERIFIED_PI } from "./compat.ts";
 
 export type Locale = "en" | "zh";
 
@@ -15,13 +15,14 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Protection is not initialized",
     "Run /protecter status for the initialization error, fix it, then /reload",
   ],
-  UNSUPPORTED_PI: [
-    "Unsupported Pi version",
-    `Use Pi ${SUPPORTED_PI}`,
+  PI_CAPABILITY: [
+    "This Pi build is missing a capability this extension requires",
+    `Update Pi; if the newest Pi still fails, report the listed capability at ${ISSUE_URL}`,
   ],
   GUARD_UNAVAILABLE: [
     "Cannot cover the model calls that have no extension hook",
-    "This Pi build exposes no model runtime to wrap; use Pi " + SUPPORTED_PI + " or set a trusted Pi version",
+    "This Pi build exposes no model runtime to wrap; update Pi, or report this build at " +
+      ISSUE_URL,
   ],
   MACHINE_ID: [
     "Machine identifier unavailable",
@@ -228,10 +229,14 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
 const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
   INTERNAL: ["未预期的本地错误", "重载并检查安装包完整性"],
   NOT_READY: ["防护尚未初始化", "查看初始化错误，修复后重载"],
-  UNSUPPORTED_PI: ["Pi 版本不受支持", `请使用 Pi ${SUPPORTED_PI}`],
+  PI_CAPABILITY: [
+    "当前 Pi 构建缺少本扩展所需的能力",
+    `请升级 Pi；若最新版 Pi 仍然失败，请将所列能力反馈至 ${ISSUE_URL}`,
+  ],
   GUARD_UNAVAILABLE: [
     "无法覆盖没有扩展钩子的模型调用",
-    "该 Pi 构建未暴露可包装的模型运行时：请使用 Pi " + SUPPORTED_PI + " 或改用可信的 Pi 版本",
+    "该 Pi 构建未暴露可包装的模型运行时：请升级 Pi，或将该构建反馈至 " +
+      ISSUE_URL,
   ],
   MACHINE_ID: ["无法获取机器标识", "检查系统机器标识访问权限，不使用随机回退"],
   CONFIG_JSON: ["配置 JSON 无效", "本地修复 JSON 语法后重载"],
@@ -382,6 +387,12 @@ const UI_EN = {
     "SPI Protecter: no rule matched ({chars}); the text below is unchanged.",
   testFileLabel: "Input: local file",
   testTextLabel: "Input: inline text",
+  capabilityBlocked:
+    "SPI Protecter: this Pi build does not expose {names}, so protection is off and requests are blocked instead of sent as plaintext. Report it: {url}",
+  piNewer:
+    "SPI Protecter: Pi {version} is newer than the suite-verified releases ({verified}). Every required hook is present, so protection is active and each request is verified; report anything that looks wrong: {url}",
+  hookBypassed:
+    "SPI Protecter: Pi did not run the request hook for a model call, so the runtime guard redacted it instead. Protection held, but please report it: {url}",
   logsTuiOnly: "Open the local TUI to view protection records.",
   logsNone: "No readable records.",
   logsSelectTitle: "Protection records",
@@ -460,6 +471,12 @@ const UI_ZH: Record<UiKey, string> = {
   testUnchanged: "SPI Protecter：没有规则命中（{chars}），下方文本未改动。",
   testFileLabel: "输入：本地文件",
   testTextLabel: "输入：行内文本",
+  capabilityBlocked:
+    "SPI Protecter：当前 Pi 构建未暴露 {names}，因此保护未启用，请求会被拦截而不以明文发送。请反馈：{url}",
+  piNewer:
+    "SPI Protecter：Pi {version} 高于已经完整测试验证的版本（{verified}）。所需钩子均存在，保护已生效并会逐次校验；如发现异常请反馈：{url}",
+  hookBypassed:
+    "SPI Protecter：Pi 未对某次模型调用执行请求钩子，已由运行时闸门脱敏。保护仍然有效，但请反馈：{url}",
   logsTuiOnly: "请在本地 TUI 查看保护记录。",
   logsNone: "暂无可读记录。",
   logsSelectTitle: "保护记录",

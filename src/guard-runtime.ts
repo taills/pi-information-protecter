@@ -85,6 +85,60 @@ function hasPayloadHook(options: unknown): boolean {
 }
 
 /**
+ * Per-call proof that Pi really ran `before_provider_request`.
+ *
+ * A payload-carrying call is passed through because the documented hook
+ * redacts it, and because `stream`/`streamSimple` must keep their synchronous
+ * shape. If a future Pi renames, reorders or drops that hook, passing the call
+ * through would send plaintext, and no version check can see it happen. So the
+ * guard wraps `onPayload`: Pi awaits it and uses its return value, so counting
+ * this extension's own hook runs around it turns an unverifiable assumption
+ * into a per-call check, and the guard redacts the payload itself when the hook
+ * did not run.
+ *
+ * 按次证明 Pi 确实执行了 `before_provider_request`。
+ *
+ * 带 payload 钩子的调用之所以直通，是因为文档钩子会对其脱敏，且
+ * `stream`/`streamSimple` 必须保持同步形态。若未来的 Pi 改名、调整顺序或移除该钩子，
+ * 直通就会发送明文，而任何版本检查都无法发现。因此闸门包装 `onPayload`：Pi 会 await
+ * 它并使用其返回值，在其前后统计本扩展钩子的执行次数，就把不可验证的假设变成了逐次校验；
+ * 钩子未执行时，由闸门自行脱敏该请求体。
+ */
+export interface HookWitness {
+  /** Monotonic count of this extension's request-hook runs. / 本扩展请求钩子的单调递增计数。 */
+  runs: () => number;
+  /** Called once per call Pi did not route through the hook. / Pi 未经钩子处理的调用每次上报一次。 */
+  onBypass?: () => void;
+}
+
+/** Pi's own call options; only `onPayload` is inspected. / Pi 自身的调用选项，仅检查 `onPayload`。 */
+type CallOptions = Record<string, unknown>;
+
+function verifiedOptions(
+  model: unknown,
+  options: unknown,
+  redact: RedactContext,
+  witness: HookWitness | undefined,
+): CallOptions | undefined {
+  if (!options || typeof options !== "object") return undefined;
+  const hook = (options as { onPayload?: unknown }).onPayload;
+  if (!witness || typeof hook !== "function") return options as CallOptions;
+  const original = hook as (payload: unknown) => unknown;
+  return {
+    ...(options as Record<string, unknown>),
+    onPayload: async (payload: unknown) => {
+      const before = witness.runs();
+      const result = await original(payload);
+      if (witness.runs() > before) return result;
+      witness.onBypass?.();
+      // Fail closed: throwing here cancels the call, redacting keeps it working.
+      // 失败拦截：在此抛出会取消调用，此处脱敏则能继续工作。
+      return redact(model, result === undefined ? payload : result);
+    },
+  };
+}
+
+/**
  * Wrap the runtime and return an idempotent uninstall function. Failing to
  * install is a protection failure, not a degraded feature: the caller must
  * block, because these paths would otherwise send plaintext.
@@ -94,6 +148,7 @@ function hasPayloadHook(options: unknown): boolean {
 export function installRuntimeGuard(
   registry: unknown,
   redact: RedactContext,
+  witness?: HookWitness,
 ): () => void {
   const target = resolveRuntime(registry);
   // A reload builds a new extension runtime around the same ModelRuntime.
@@ -108,7 +163,12 @@ export function installRuntimeGuard(
     const lazy = (LAZY_METHODS as readonly string[]).includes(name);
     const wrapper: Call = function (this: unknown, model, context, options) {
       if (lazy && hasPayloadHook(options))
-        return original.call(this, model, context, options);
+        return original.call(
+          this,
+          model,
+          context,
+          verifiedOptions(model, options, redact, witness),
+        );
       return (async () =>
         original.call(this, model, await redact(model, context), options))();
     };

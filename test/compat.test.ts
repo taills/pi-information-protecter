@@ -1,86 +1,133 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { supportsPi, SUPPORTED_PI } from "../src/compat.ts";
+import {
+  ISSUE_URL,
+  VERIFIED_PI,
+  isVerified,
+  missingCapabilities,
+} from "../src/compat.ts";
 import { describeCode, setLocale, detectLocale } from "../src/locale.ts";
 
-test("only verified Pi releases are accepted / 仅接受经验证的 Pi 版本", () => {
-  // Each entry was decided by running the full suite against that release.
-  // 每一项都依据在该版本上运行完整测试的结果。
-  const accepted = [
+/**
+ * The gate is what this Pi build exposes, not its version number: a Pi upgrade
+ * must keep working, and only a missing capability may stop the extension.
+ * 门禁取决于当前 Pi 构建暴露了什么，而不是版本号：Pi 升级后必须继续可用，
+ * 只有能力缺失才允许阻止扩展。
+ */
+function fakeApi(overrides: Record<string, unknown> = {}) {
+  return {
+    on() {},
+    registerCommand() {},
+    registerMarkdownTransformer() {},
+    ...overrides,
+  };
+}
+
+function fakeContext(overrides: Record<string, unknown> = {}) {
+  return {
+    waitForIdle() {},
+    reload() {},
+    abort() {},
+    modelRegistry: { runtime: {} },
+    ui: {
+      notify() {},
+      setStatus() {},
+      select() {},
+      confirm() {},
+      editor() {},
+    },
+    ...overrides,
+  };
+}
+
+test("a complete Pi build reports no missing capability / 能力齐备的 Pi 构建无缺失项", () => {
+  assert.deepEqual(missingCapabilities(fakeApi()), []);
+  assert.deepEqual(missingCapabilities(fakeApi(), fakeContext()), []);
+});
+
+test("each required capability is detected when absent / 每项必需能力缺失都能被发现", () => {
+  // 0.83.0 and earlier lacked the Markdown transformer; the probe must refuse
+  // such a build without knowing its version number.
+  // 0.83.0 及更早没有 Markdown 转换器；探测必须在不知版本号的情况下拒绝该构建。
+  for (const name of ["on", "registerCommand", "registerMarkdownTransformer"]) {
+    const api = fakeApi({ [name]: undefined });
+    assert.deepEqual(
+      missingCapabilities(api),
+      [`pi.${name}()`],
+      `should detect missing ${name}`,
+    );
+  }
+  assert.deepEqual(
+    missingCapabilities(fakeApi(), fakeContext({ abort: undefined })),
+    ["ctx.abort()"],
+  );
+  // Command UX is not a protection capability: `/protecter logs` degrades, but
+  // nothing is sent as plaintext, so these must not block.
+  // 命令交互不属于保护能力：`/protecter logs` 会削弱，但不会发送明文，因此不得拦截。
+  for (const name of ["waitForIdle", "reload", "select", "confirm", "editor"])
+    assert.deepEqual(
+      missingCapabilities(
+        fakeApi(),
+        fakeContext({
+          [name]: undefined,
+          ui: { ...fakeContext().ui, [name]: undefined },
+        }),
+      ),
+      [],
+      `${name} must not block protection`,
+    );
+  for (const name of ["notify", "setStatus"]) {
+    const ui = { ...fakeContext().ui, [name]: undefined };
+    assert.deepEqual(
+      missingCapabilities(fakeApi(), fakeContext({ ui })),
+      [`ctx.ui.${name}()`],
+    );
+  }
+  // Without a model runtime, compaction, /tree, /bug and nested calls would
+  // send plaintext, so its absence must block too.
+  // 没有模型运行时，压缩、/tree、/bug 与嵌套调用会发送明文，因此缺失同样必须拦截。
+  assert.deepEqual(
+    missingCapabilities(fakeApi(), fakeContext({ modelRegistry: undefined })),
+    ["ctx.modelRegistry"],
+  );
+  // A non-object API must never be treated as capable. / 非对象 API 一律不得视为可用。
+  assert.ok(missingCapabilities(undefined).length >= 3);
+  assert.ok(missingCapabilities("not-an-api").length >= 3);
+});
+
+test("verified releases are announced, not enforced / 已验证版本用于提示而非门禁", () => {
+  for (const version of [
     "0.84.0",
-    "0.84.1",
-    "0.84.2",
-    "0.84.3",
-    "0.84.4",
     "0.85.1",
-    "0.86.0",
-    "0.86.1",
-    "0.87.0",
     "0.87.1",
-    "0.99.0",
     "0.99.2",
     "1.2.0",
     "1.3.0",
-  ];
-  for (const version of accepted)
-    assert.equal(supportsPi(version), true, `should accept ${version}`);
-
-  const refused = [
-    // Missing registerMarkdownTransformer. / 缺少 registerMarkdownTransformer。
-    "0.74.0",
-    "0.80.10",
-    "0.82.1",
-    "0.83.0",
-    // Pi imports an undeclared package. / Pi 引用了未声明的包。
-    "0.85.0",
-    // Unverified future lines. / 未经验证的后续版本。
-    "0.88.0",
-    "0.98.0",
-    // Pi resolves a codemode export that no longer exists. / Pi 解析到已不存在的 codemode 导出。
-    "1.0.0",
-    "1.0.4",
-    "1.1.0",
     "1.4.0",
-    "2.0.0",
-    // Unparseable input must never pass. / 无法解析的输入一律不通过。
-    "",
-    "not-a-version",
-    "0.86",
-  ];
-  for (const version of refused)
-    assert.equal(supportsPi(version), false, `should refuse ${version}`);
+  ])
+    assert.equal(isVerified(version), true, `should be verified: ${version}`);
+  // Unverified only means "announce once"; the capability probe still decides.
+  // 未验证仅意味着"提示一次"，判断仍由能力探测负责。
+  for (const version of ["0.83.0", "1.5.0", "2.0.0", "", "not-a-version"])
+    assert.equal(isVerified(version), false, `should not be verified: ${version}`);
+  assert.match(VERIFIED_PI, /0\.84\.0/);
+  assert.match(VERIFIED_PI, /1\.4\.x/);
 });
 
-test("prerelease and build suffixes follow the base version / 预发布与构建后缀按基础版本判断", () => {
-  assert.equal(supportsPi("0.86.1-beta.1"), true);
-  assert.equal(supportsPi("0.87.0+build.5"), true);
-  assert.equal(supportsPi("0.85.0-rc.1"), false);
-  assert.equal(supportsPi("0.83.0-rc.1"), false);
-});
-
-test("the documented range matches the gate / 文档范围与门禁一致", () => {
-  // The advice text must not promise a version the gate refuses.
-  // 建议文案不得承诺门禁会拒绝的版本。
-  for (const version of ["0.84.0", "0.85.1", "0.87.0"])
-    assert.equal(supportsPi(version), true, version);
-  assert.match(SUPPORTED_PI, /0\.84\.0/);
-  assert.match(SUPPORTED_PI, /0\.87\.x/);
-  for (const version of ["0.99.0", "1.2.0", "1.3.0"])
-    assert.equal(supportsPi(version), true, version);
-  assert.match(SUPPORTED_PI, /1\.3\.x/);
-  assert.ok(!SUPPORTED_PI.includes("0.85.0"));
-});
-
-test("both languages quote the same supported range / 两种语言引用同一范围", (t) => {
-  // The advice drifted from the gate once already; keep them tied together.
-  // 这段建议曾与门禁脱节一次，此处将两者绑定。
+test("the capability failure points at the issue tracker / 能力失败指向问题反馈地址", (t) => {
+  // A user cannot fix Pi internals, so the only useful action is a report with
+  // the exact capability name, in whichever language the session uses.
+  // 用户无法修改 Pi 内部实现，唯一有用的处理是带上准确能力名去反馈，且需与会话语言一致。
   t.after(() => setLocale(detectLocale()));
+  assert.match(ISSUE_URL, /^https:\/\/github\.com\/taills\/pi-information-protecter\//);
   for (const locale of ["en", "zh"] as const) {
     setLocale(locale);
-    const { action } = describeCode("UNSUPPORTED_PI");
-    assert.ok(
-      action.includes(SUPPORTED_PI),
-      `${locale} advice must quote the supported range: ${action}`,
-    );
+    for (const code of ["PI_CAPABILITY", "GUARD_UNAVAILABLE"]) {
+      const { action } = describeCode(code);
+      assert.ok(
+        action.includes(ISSUE_URL),
+        `${locale} ${code} advice must quote the issue URL: ${action}`,
+      );
+    }
   }
 });

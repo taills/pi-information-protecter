@@ -5,7 +5,12 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Protecter } from "./engine.ts";
-import { supportsPi } from "./compat.ts";
+import {
+  ISSUE_URL,
+  VERIFIED_PI,
+  isVerified,
+  missingCapabilities,
+} from "./compat.ts";
 import { blocksConfigAccess } from "./guard.ts";
 import { redactCompaction, redactTree } from "./compaction.ts";
 import { installRuntimeGuard } from "./guard-runtime.ts";
@@ -60,7 +65,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // 每个环境只用一种语言，不同时展示两种语言。
   setLocale(detectLocale());
   const engine = new Protecter(getAgentDir());
-  const compatible = supportsPi(VERSION);
+  // Capability, not version: a missing hook blocks, a newer Pi keeps working.
+  // 以能力而非版本为准：钩子缺失则拦截，更新的 Pi 仍可正常使用。
+  let missing = missingCapabilities(pi);
+  const compatible = () => missing.length === 0;
+  // Counts this extension's request-hook runs so the runtime guard can prove,
+  // per call, that Pi still routes payloads through it.
+  // 记录本扩展请求钩子的执行次数，供运行时闸门逐次证明 Pi 仍经钩子传递请求体。
+  let hookRuns = 0;
+  let bypassReported = false;
   let healthy = false;
   // Remember the last block so the user can inspect it after the notification.
   // 保留最近一次拦截原因，供通知消失后查看。
@@ -83,16 +96,55 @@ export default function informationProtecter(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event, ctx) => {
     try {
-      if (!compatible) throw failure("UNSUPPORTED_PI");
+      // Probe this build before anything else; a listed capability blocks.
+      // 先探测当前构建；一旦有能力缺失即拦截。
+      missing = missingCapabilities(pi, ctx);
+      if (!compatible()) {
+        ctx.ui.notify(
+          t("capabilityBlocked", {
+            names: missing.join(", "),
+            url: ISSUE_URL,
+          }),
+          "error",
+        );
+        throw failure("PI_CAPABILITY");
+      }
       await engine.initialize();
       // Install before reporting health: the paths this guard covers, Pi's own
       // summarizers and nested model calls, have no event to fail closed in.
       // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
       // 没有可供失败拦截的事件。
-      releaseGuard = installRuntimeGuard(ctx.modelRegistry, (model, context) =>
-        engine.redact(context, providerOf(model)),
+      releaseGuard = installRuntimeGuard(
+        ctx.modelRegistry,
+        (model, context) => engine.redact(context, providerOf(model)),
+        {
+          runs: () => hookRuns,
+          onBypass: () => {
+            // Protection held, but the documented hook stopped firing: say so
+            // once, because that is what a user must report.
+            // 保护仍生效，但文档钩子已不再触发：提示一次，因为这正是需要反馈的情况。
+            if (bypassReported) return;
+            bypassReported = true;
+            try {
+              ctx.ui.notify(t("hookBypassed", { url: ISSUE_URL }), "warning");
+            } catch {
+              /* Redaction already happened. / 脱敏已完成。 */
+            }
+          },
+        },
       );
       healthy = true;
+      // A newer Pi is announced, never refused: the probe above is the gate.
+      // 更新的 Pi 只提示不拒绝：上方的能力探测才是门禁。
+      if (!isVerified(VERSION))
+        ctx.ui.notify(
+          t("piNewer", {
+            version: VERSION,
+            verified: VERIFIED_PI,
+            url: ISSUE_URL,
+          }),
+          "warning",
+        );
       const rules = engine.ruleCount;
       ctx.ui.setStatus(
         "protecter",
@@ -119,8 +171,12 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   });
 
   pi.on("before_provider_request", async (event, ctx) => {
+    // Count the run before anything can fail: the runtime guard only needs to
+    // know whether Pi reached this handler at all.
+    // 在任何失败之前先计数：运行时闸门只需知道 Pi 是否到达过本处理器。
+    hookRuns++;
     try {
-      if (!compatible) throw failure("UNSUPPORTED_PI");
+      if (!compatible()) throw failure("PI_CAPABILITY");
       const payload = await engine.redact(
         event.payload,
         ctx.model?.provider ?? "unknown",
@@ -215,7 +271,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     ctx: Pick<ExtensionContext, "ui">,
     signal: AbortSignal,
   ) => {
-    if (!compatible) throw failure("UNSUPPORTED_PI");
+    if (!compatible()) throw failure("PI_CAPABILITY");
     if (!engine.ready)
       throw engine.lastDiagnostic
         ? failure(engine.lastDiagnostic.code, engine.lastDiagnostic)

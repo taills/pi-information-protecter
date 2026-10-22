@@ -4,7 +4,7 @@ import { describeCode, getLocale, t } from "./locale.ts";
 const stages = {
   INTERNAL: "internal",
   NOT_READY: "initialization",
-  UNSUPPORTED_PI: "initialization",
+  PI_CAPABILITY: "initialization",
   GUARD_UNAVAILABLE: "initialization",
   MACHINE_ID: "initialization",
   CONFIG_JSON: "configuration",

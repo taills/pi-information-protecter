@@ -157,6 +157,59 @@ test("hookless model calls are redacted / 无钩子的模型调用被脱敏", as
   release();
 });
 
+test("a request hook that never runs is covered by the guard / 钩子未执行时由闸门覆盖", async () => {
+  // This is what replaces the old version allowlist: instead of trusting that a
+  // given Pi release still fires before_provider_request, the guard counts the
+  // extension's own hook runs around Pi's awaited onPayload. A release that
+  // renames or drops the hook is detected on the first call and redacted here,
+  // so a Pi upgrade cannot silently turn passthrough into plaintext.
+  // 这就是取代旧版本白名单的机制：不再假定某个 Pi 版本仍会触发
+  // before_provider_request，而是在 Pi 所 await 的 onPayload 前后统计本扩展钩子的执行次数。
+  // 若某版本改名或移除该钩子，首次调用即被发现并在此脱敏，
+  // 因此 Pi 升级不会把直通静默地变成明文。
+  const { registry, seen } = fakeRuntime();
+  const { redact, calls } = redactor();
+  let hookRuns = 0;
+  let bypasses = 0;
+  const release = installRuntimeGuard(registry, redact, {
+    runs: () => hookRuns,
+    onBypass: () => {
+      bypasses++;
+    },
+  });
+  const call = (onPayload: (payload: unknown) => unknown) =>
+    (
+      registry.runtime as unknown as Record<
+        string,
+        (...a: unknown[]) => { result: () => Promise<unknown> }
+      >
+    ).stream({ provider: "p" }, { messages: ["plain"] }, { onPayload });
+
+  // A hook that runs keeps the passthrough: Pi's own result is used as is.
+  // 钩子正常执行时保持直通：Pi 自身的结果原样采用。
+  call(() => {
+    hookRuns++;
+    return { hooked: true };
+  });
+  const hooked = await (seen[0].options as {
+    onPayload: (payload: unknown) => Promise<unknown>;
+  }).onPayload({ messages: ["plain"] });
+  assert.deepEqual(hooked, { hooked: true });
+  assert.equal(bypasses, 0);
+  assert.deepEqual(calls, []);
+
+  // A hook Pi no longer routes through this extension must not pass through.
+  // Pi 不再经本扩展转发的钩子不得直通。
+  call((payload) => payload);
+  const bypassed = await (seen[1].options as {
+    onPayload: (payload: unknown) => Promise<unknown>;
+  }).onPayload({ messages: ["plain"] });
+  assert.deepEqual(bypassed, { redacted: true });
+  assert.equal(bypasses, 1);
+  assert.equal(calls.length, 1);
+  release();
+});
+
 test("classification and images are redacted even when hooked / 分类与图像即便带钩子也脱敏", async () => {
   const { registry, seen } = fakeRuntime();
   const { redact } = redactor();
