@@ -81,6 +81,8 @@ gh workflow run publish.yml --ref main -f dry_run=true
   修复外部配置后可重跑失败任务，或针对匹配标签以 `dry_run=false` 手动执行；拒绝从分支执行真实发布。
 - On timeout, query the exact npm version before retrying. Published versions are immutable. Never move a release tag or force-push to conceal a failure; use a new version for source fixes.
   超时先查询精确 npm 版本再重试；已发布版本不可覆盖。不要移动标签或强推掩盖失败，源码修复使用新版本。
+- A red run does not by itself mean the release failed: the publish step can succeed while "Verify registry version" still fails, because npm accepts a publish before its read path serves the version. v0.13.0 published successfully while verification saw `E404` for six minutes. Check `npm view <pkg>@<version>` and `npm audit signatures`; if the version is live with provenance, the release stands and only the verification needs investigating. Rerunning the job would then fail with `E409` on the immutable version.
+  流水线红并不等于发布失败：发布步骤可能已成功，而“验证 registry 版本”仍失败，因为 npm 接受发布早于读取端提供该版本。v0.13.0 已成功发布，而验证步骤连续六分钟返回 `E404`。请执行 `npm view <包>@<版本>` 与 `npm audit signatures`；若该版本已上线且带来源证明，则发布有效，只需排查验证环节；此时重跑任务会因版本不可覆盖而报 `E409`。
 
 References: [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) and [npm provenance](https://docs.npmjs.com/generating-provenance-statements).
 
