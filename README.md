@@ -41,7 +41,7 @@ If redaction itself fails for any reason, the request is **blocked**, never sent
 
 **Treat `/bug`, `/share` and `/export` as publishing plaintext.** To report a bug from a session that touched real secrets, use the local zip/export option, open it, and check the contents before sending it anywhere.
 
-Two more limits worth knowing: only text matching your rules is protected — not paraphrases, split characters or values the model infers — and requests containing images, audio, video or file blocks are rejected rather than sent, because they cannot be inspected.
+Two more limits worth knowing: only text matching your rules is protected — not paraphrases, split characters or values the model infers — and attachments cannot be inspected or redacted. By default, the extension asks before sending them; allowing passes them through unchanged.
 
 ## Installation
 
@@ -147,6 +147,14 @@ Never type a secret as a command argument — `test` is the one exception, becau
 ```text
 /protecter test Call Alex Morgan at 13800138000
 /protecter test @./demo.txt
+```
+
+### Attachments
+
+The default `attachments: "ask"` prompts when a request contains opaque image, audio, video or file content. Allowing sends the request unchanged, without attachment inspection or redaction; declining cancels it. Choose `"allow"` to always pass attachments through, or `"deny"` to always cancel them. Text in requests without attachments continues through normal redaction.
+
+```json
+{ "version": 1, "attachments": "ask", "sensitiveWords": [] }
 ```
 
 ### Context compaction
@@ -317,7 +325,7 @@ Pi 没有为后三者提供任何钩子，因此本扩展包装会话共享的�
 
 **请把 `/bug`、`/share`、`/export` 视为公开明文。** 若需要为接触过真实秘密的会话提交错误报告，请使用本地 zip／导出选项，打开它，确认内容之后再决定发给谁。
 
-另外两点同样要紧：只有命中你的规则的文本会被保护——改写、片段值以及模型推断出的内容都不会；包含图片、音频、视频或文件块的请求会被拒绝而不是发送，因为它们无法被检查。
+另外两点同样要紧：只有命中你的规则的文本会被保护——改写、片段值以及模型推断出的内容都不会；附件无法被检查或脱敏，默认在发送前询问，允许后会原样放行。
 
 ## 安装
 
@@ -426,6 +434,14 @@ pi update npm:pi-information-protecter
 ```
 
 不要把秘密作为命令参数输入。
+
+### 附件
+
+默认 `attachments: "ask"`：请求包含不透明的图片、音频、视频或文件内容时会询问。允许后请求将未经附件检查或脱敏而原样发送；拒绝则取消请求。设为 `"allow"` 可始终放行附件，设为 `"deny"` 则始终取消。没有附件的请求仍正常脱敏。
+
+```json
+{ "version": 1, "attachments": "ask", "sensitiveWords": [] }
+```
 
 ### 上下文压缩
 

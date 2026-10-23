@@ -133,6 +133,30 @@ for (const mode of ["source", "packed"] as const) {
     // 仅模拟宿主界面和智能体动作，不模拟扩展、加载器或中间件执行器。
     let aborted = false;
     let injected = 0;
+    const uiPreviews: string[] = [];
+    runner.setUIContext({
+      select: async (title: string, options: string[]) => {
+        if (title.includes("Allow attachments?")) assert.ok(title.includes("cannot inspect or redact"));
+        return options[0];
+      },
+      confirm: async () => true,
+      input: async () => undefined,
+      notify: () => {},
+      onTerminalInput: () => () => {},
+      setStatus: () => {},
+      setWorkingMessage: () => {},
+      setWorkingVisible: () => {},
+      setWorkingIndicator: () => {},
+      setHiddenThinkingLabel: () => {},
+      setWidget: () => {},
+      setFooter: () => {},
+      setHeader: () => {},
+      custom: async () => undefined,
+      editor: async (_title: string, prefill?: string) => {
+        uiPreviews.push(prefill ?? "");
+        return undefined;
+      },
+    } as never, "tui");
     runner.bindCore(
       {
         sendMessage() {
@@ -177,6 +201,7 @@ for (const mode of ["source", "packed"] as const) {
       join(dir, "protecter.json"),
       JSON.stringify({
         version: 1,
+        attachments: "ask",
         sensitiveWords: [
           "fake-private-password",
           {
@@ -223,23 +248,35 @@ for (const mode of ["source", "packed"] as const) {
         notify: (message: string) => {
           notices.push(message);
         },
-        select: async (_title: string, options: string[]) => options[0],
+        select: async (title: string, options: string[]) => {
+        if (title.includes("Allow attachments?")) assert.ok(title.includes("cannot inspect or redact"));
+        return options[0];
+      },
         confirm: async () => true,
         editor: async (_title: string, text?: string) => {
-          previews.push(text ?? "");
+          uiPreviews.push(text ?? "");
           return undefined;
         },
       },
     };
+    const attachmentPayload = { content: [
+      { type: "text", text: "fake-private-password" },
+      { type: "image", data: "opaque-image-data" },
+    ] };
+    const attachmentOutgoing = (await runner.emitBeforeProviderRequest(attachmentPayload)) as typeof attachmentPayload;
+    assert.equal(attachmentOutgoing.content[1].data, "opaque-image-data");
+    assert.notEqual(attachmentOutgoing.content[0].text, "fake-private-password");
+    assert.ok(!aborted);
+
     await command.handler("", localCtx);
-    assert.ok(previews[0].includes("fake-private-password"));
+    assert.equal(uiPreviews.length, 1);
     await command.handler("logs", { ...localCtx, mode: "rpc" });
-    assert.equal(previews.length, 1);
+    assert.equal(previews.length, 0);
     await command.handler("logs", {
       ...localCtx,
       ui: { ...localCtx.ui, confirm: async () => false },
     });
-    assert.equal(previews.length, 1);
+    assert.equal(previews.length, 0);
     assert.equal(injected, 0);
     // Shape-preserving value: same length, same hyphen layout, letters only.
     // 同形替换值：长度与连字符位置不变，仅含字母。
@@ -253,17 +290,17 @@ for (const mode of ["source", "packed"] as const) {
     const demoPath = join(dir, "demo.txt");
     writeFileSync(demoPath, "contact fake-private-password now");
     await command.handler(`test @${demoPath}`, localCtx);
-    const filePreview = previews.at(-1)!;
+    const filePreview = uiPreviews.at(-1)!;
     assert.ok(!filePreview.includes("fake-private-password"));
     assert.ok(filePreview.includes(token));
     await command.handler("test Apple Inc. stays fixed", localCtx);
-    assert.ok(previews.at(-1)!.includes("Alphabet Inc."));
+    assert.ok(uiPreviews.at(-1)!.includes("Alphabet Inc."));
     // A missing argument prints usage; an unreadable path reports TEST_INPUT.
     // 缺少参数时提示用法；路径不可读时返回 TEST_INPUT。
-    const previewCount = previews.length;
+    const previewCount = uiPreviews.length;
     await command.handler("test", localCtx);
     await command.handler(`test @${join(dir, "missing.txt")}`, localCtx);
-    assert.equal(previews.length, previewCount);
+    assert.equal(uiPreviews.length, previewCount);
     assert.match(notices.at(-1)!, /code=TEST_INPUT/);
 
     // Pi's own summarizers, /bug and nested model calls reach the provider

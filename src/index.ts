@@ -15,6 +15,7 @@ import { blocksConfigAccess } from "./guard.ts";
 import { redactCompaction, redactTree } from "./compaction.ts";
 import { installRuntimeGuard } from "./guard-runtime.ts";
 import { ignoredCompactionKeys } from "./config.ts";
+import { hasAttachment, redactAroundAttachments } from "./attachment-gate.ts";
 import {
   failure,
   formatDiagnostic,
@@ -81,6 +82,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // Session-scoped compaction decision; the config holds the permanent one.
   // 会话级压缩决定，永久设置保存在配置中。
   let compactChoice: "allow" | "deny" | undefined;
+  let attachmentChoice: "allow" | "deny" | undefined;
   // Uninstalls the model-runtime choke point; set while a session is running.
   // 卸载模型运行时总闸门的函数，会话运行期间有值。
   let releaseGuard: (() => void) | undefined;
@@ -110,6 +112,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         throw failure("PI_CAPABILITY");
       }
       await engine.initialize();
+      attachmentChoice = undefined;
       // Install before reporting health: the paths this guard covers, Pi's own
       // summarizers and nested model calls, have no event to fail closed in.
       // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
@@ -177,6 +180,35 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     hookRuns++;
     try {
       if (!compatible()) throw failure("PI_CAPABILITY");
+      const mode = engine.attachmentMode;
+      if (hasAttachment(event.payload)) {
+        let allowed = false;
+        if (mode === "deny" || attachmentChoice === "deny") allowed = false;
+        else if (mode === "allow" || attachmentChoice === "allow") allowed = true;
+        else if (mode === "ask" && !attachmentChoice) {
+          const options = [t("attachmentAllow"), t("attachmentDeny")];
+          const picked = await ctx.ui.select(
+            `${t("attachmentAskTitle")}\n\n${t("attachmentAskBody")}`,
+            options,
+          );
+          allowed = picked === options[0];
+          if (picked !== undefined) attachmentChoice = allowed ? "allow" : "deny";
+        }
+        if (!allowed) throw failure("SCAN_ATTACHMENT");
+        ctx.ui.notify(t("attachmentAllowed"), "warning");
+        // Pass configured text through the ordinary redaction path before
+        // allowing opaque attachment bytes to accompany it.
+        const provider = ctx.model?.provider ?? "unknown";
+        const redacted = await redactAroundAttachments(
+          event.payload,
+          async (text) => {
+            const result = await engine.redact(text, provider);
+            return typeof result === "string" ? result : text;
+          },
+        );
+        healthy = true;
+        return redacted;
+      }
       const payload = await engine.redact(
         event.payload,
         ctx.model?.provider ?? "unknown",

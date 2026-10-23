@@ -2,7 +2,7 @@
  * Single-language messages chosen from the environment locale.
  * 根据环境语言选择单一语言的提示文案。
  */
-import { ISSUE_URL, VERIFIED_PI } from "./compat.ts";
+import { ISSUE_URL } from "./compat.ts";
 
 export type Locale = "en" | "zh";
 
@@ -192,6 +192,7 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Invalid compaction setting",
     'Use "ask", "protected" or "off", or an object with mode',
   ],
+  CONFIG_ATTACHMENT: ["Invalid attachment setting", 'Use "ask", "allow" or "deny"'],
   AUDIT_BATCH_LIMIT: [
     "Audit batch exceeds the size limit",
     "Reduce matched content per request",
@@ -343,6 +344,7 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
     "compaction 配置值无效",
     '请使用 "ask"、"protected"、"off"，或含 mode 的对象',
   ],
+  CONFIG_ATTACHMENT: ["附件配置值无效", '请使用 "ask"、"allow" 或 "deny"'],
   AUDIT_BATCH_LIMIT: ["审计批次超过上限", "减少单个请求的命中内容"],
   AUDIT_FULL: ["审计日志将超过上限", "检查记录后清空日志或本地归档"],
   AUDIT_PARTIAL: ["审计日志末行不完整", "本地检查或清空日志，不要上传日志"],
@@ -426,6 +428,11 @@ const UI_EN = {
     "SPI Protecter: compaction allowed for this session. Set \"compaction\" in the local config to make it permanent.",
   compactDenyNotice:
     "SPI Protecter: compaction refused for this session; use /new to start a new session.",
+  attachmentAskTitle: "Allow attachments?",
+  attachmentAskBody: "This request contains image, audio, video or file content that SPI Protecter cannot inspect or redact. Allowing sends it unchanged to the provider.",
+  attachmentAllow: "Allow this request",
+  attachmentDeny: "Cancel request",
+  attachmentAllowed: "SPI Protecter: attachment allowed for this request without inspection or redaction.",
 };
 
 type UiKey = keyof typeof UI_EN;
@@ -449,6 +456,11 @@ const UI_ZH: Record<UiKey, string> = {
     "SPI Protecter：本会话内允许压缩。如需永久生效，请在本地配置中设置 \"compaction\"。",
   compactDenyNotice:
     "SPI Protecter：本会话内拒绝压缩；可使用 /new 开启新会话。",
+  attachmentAskTitle: "允许发送附件？",
+  attachmentAskBody: "此请求包含 SPI Protecter 无法检查或脱敏的图片、音频、视频或文件内容。允许后会将附件原样发送给提供商。",
+  attachmentAllow: "允许本次请求",
+  attachmentDeny: "取消请求",
+  attachmentAllowed: "SPI Protecter：本次请求的附件未经检查或脱敏，将继续发送。",
   blockedHeader: "SPI Protecter 已阻止该请求",
   reasonLabel: "原因",
   actionLabel: "处理",

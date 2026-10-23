@@ -21,6 +21,7 @@ export class Protecter {
   private queue: Promise<unknown> = Promise.resolve();
   private readonly workers = new Set<Worker>();
   private closed = false;
+  private readonly attachmentOptions: { mode?: "ask" | "allow" | "deny" } = {};
   private snapshot?: Snapshot;
   private lastError?: Diagnostic;
   // Mappings only grow until close(), so size is a safe cache key. / 映射仅增长至关闭，因此数量可作缓存键。
@@ -53,8 +54,10 @@ export class Protecter {
       const snapshot = await migrateConfig(this.configDir, hash);
       if (this.closed) throw failure("NOT_READY");
       this.snapshot = snapshot;
+      this.attachmentOptions.mode = snapshot.config.attachments ?? "ask";
       this.lastError = undefined;
     } catch (error) {
+      this.attachmentOptions.mode = "deny";
       const safe = sanitizeError(error, "CONFIG_IO");
       this.lastError = safe.diagnostic;
       throw safe;
@@ -87,6 +90,9 @@ export class Protecter {
   }
   get compactionMode(): CompactionMode {
     return this.compaction.mode;
+  }
+  get attachmentMode(): "ask" | "allow" | "deny" {
+    return this.attachmentOptions.mode ?? "ask";
   }
   /**
    * The configuration as written, so settings that no longer apply can be

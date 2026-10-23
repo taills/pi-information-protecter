@@ -119,6 +119,9 @@ export function mergeConfigs(configs: Config[]): Config {
   // 作用的选择，并持续被当作已忽略项上报。
   const merged: Config = { version: 1, sensitiveWords: rules };
   if (mode !== undefined) merged.compaction = { mode };
+  // Strictest attachment policy wins across migrated files: deny > ask > allow.
+  const attachmentModes = configs.map((config) => config.attachments).filter((value): value is "ask" | "allow" | "deny" => value !== undefined);
+  if (attachmentModes.length) merged.attachments = (["deny", "ask", "allow"] as const).find((value) => attachmentModes.includes(value));
   const raw = JSON.stringify(merged);
   if (Buffer.byteLength(raw) > 1024 * 1024)
     throw failure("CONFIG_SIZE", {

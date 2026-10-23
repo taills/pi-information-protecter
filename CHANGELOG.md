@@ -1,5 +1,14 @@
 # Changelog / 更新日志
 
+## 0.14.0 — Ask before passing attachments / 附件放行前先询问
+
+### Changed / 变更
+
+- Ask before sending opaque image, audio, video or file content (default `attachments: "ask"`). An explicit per-request choice can allow the unchanged attachment or cancel it; `"allow"` and `"deny"` configure a permanent policy. Attachment-free requests continue through normal redaction.
+  发送不透明的图片、音频、视频或文件内容前先询问（默认 `attachments: "ask"`）。用户可明确选择原样发送附件或取消请求；也可用 `"allow"` 和 `"deny"` 配置固定策略。没有附件的请求仍按原有流程脱敏。
+- Merge attachment settings conservatively across configuration files: deny takes precedence over ask, which takes precedence over allow.
+  多份配置合并附件策略时从严处理：拒绝优先于询问，询问优先于允许。
+
 ## 0.13.0 — Capabilities, not a version allowlist / 以能力为准，而非版本白名单
 
 ### Changed / 变更

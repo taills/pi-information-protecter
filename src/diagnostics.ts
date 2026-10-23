@@ -20,6 +20,7 @@ const stages = {
   CONFIG_ALIAS_CONFLICT: "configuration",
   CONFIG_TIMEOUT: "configuration",
   CONFIG_COMPACTION: "configuration",
+  CONFIG_ATTACHMENT: "configuration",
   MIGRATION_LOCKED: "migration",
   MIGRATION_CHANGED: "migration",
   MIGRATION_LIMIT: "migration",

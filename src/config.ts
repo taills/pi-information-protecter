@@ -62,6 +62,7 @@ export interface Config {
   version: 1;
   sensitiveWords: Rule[];
   compaction?: CompactionMode | CompactionSettings;
+  attachments?: "ask" | "allow" | "deny";
 }
 export const DEFAULT_CONFIG: Config = { version: 1, sensitiveWords: [] };
 /** Asking is the default: compaction stays visible instead of silent. / 默认询问，不让压缩静默发生。 */
@@ -125,12 +126,14 @@ export function parseConfig(raw: string): Config {
       value.version !== 1 ||
       !Array.isArray(value.sensitiveWords) ||
       Object.keys(value).some(
-        (k) => !["version", "sensitiveWords", "compaction"].includes(k),
+        (k) => !["version", "sensitiveWords", "compaction", "attachments"].includes(k),
       )
     )
       throw failure("CONFIG_SCHEMA");
     if (Object.hasOwn(value, "compaction"))
       validateCompaction((value as { compaction?: unknown }).compaction);
+    if (Object.hasOwn(value, "attachments") && !["ask", "allow", "deny"].includes((value as { attachments?: string }).attachments ?? ""))
+      throw failure("CONFIG_ATTACHMENT");
     if (value.sensitiveWords.length > 1000)
       throw failure("CONFIG_SIZE", { limit: 1000 });
     const definitions = new Map<string, string | undefined>();
