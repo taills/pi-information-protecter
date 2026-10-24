@@ -15,7 +15,17 @@ import { blocksConfigAccess } from "./guard.ts";
 import { redactCompaction, redactTree } from "./compaction.ts";
 import { installRuntimeGuard } from "./guard-runtime.ts";
 import { ignoredCompactionKeys } from "./config.ts";
-import { hasAttachment, imageAttachments, redactAroundAttachments } from "./attachment-gate.ts";
+import {
+  attachmentItems,
+  hasAttachment,
+  replaceImageAttachments,
+  redactAroundAttachments,
+} from "./attachment-gate.ts";
+import {
+  editImageAttachment,
+  openImageWithDefaultApp,
+  supportsImageEditing,
+} from "./attachment-editor.ts";
 import { Image } from "@earendil-works/pi-tui";
 import {
   failure,
@@ -210,13 +220,16 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       const mode = engine.attachmentMode;
       if (hasAttachment(event.payload)) {
         if (mode === "deny") throw failure("SCAN_ATTACHMENT");
+        let outgoingPayload = event.payload;
         if (mode === "ask") {
-          const images = imageAttachments(event.payload);
+          const items = attachmentItems(event.payload);
+          const editedImages: Array<{ data: string; mimeType?: string } | undefined> = [];
           const knownImages = new Set(approvedImageFingerprints);
           const occurrences = new Map<string, number>();
-          const count = Math.max(images.length, 1);
-          for (let index = 0; index < count; index++) {
-            const image = images[index];
+          let imageIndex = 0;
+          for (let index = 0; index < items.length; index++) {
+            let image = items[index];
+            const currentImageIndex = image ? imageIndex++ : -1;
             const fingerprint = image
               ? createHash("sha256")
                   .update(image.mimeType ?? "image/png")
@@ -230,33 +243,57 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               occurrences.set(fingerprint, occurrence);
             }
             const approvalKey = fingerprint ? `${fingerprint}:${occurrence}` : undefined;
-            if (approvalKey && knownImages.has(approvalKey)) continue;
-            const options = image
-              ? [t("attachmentOpenImage"), t("attachmentAllow"), t("attachmentDeny")]
-              : [t("attachmentAllow"), t("attachmentDeny")];
+            if (approvalKey && knownImages.has(approvalKey)) {
+              editedImages[currentImageIndex] = undefined;
+              continue;
+            }
+            const canEditImage = image !== undefined && supportsImageEditing(image);
+            let options: string[];
+            if (image) {
+              options = [t("attachmentOpenImage")];
+              if (canEditImage) options.push(t("attachmentEditImage"));
+              options.push(t("attachmentAllow"), t("attachmentDeny"));
+            } else options = [t("attachmentAllow"), t("attachmentDeny")];
             let allowed = false;
+            let wasEdited = false;
             while (!allowed) {
               const picked = await ctx.ui.select(
-                `${t("attachmentAskTitle", { index: index + 1, total: count })}\n\n${t("attachmentAskBody")}`,
+                `${t("attachmentAskTitle", { index: index + 1, total: items.length })}\n\n${t("attachmentAskBody")}`,
                 options,
               );
               if (image && picked === options[0]) {
                 await previewAttachment(ctx, image.data, image.mimeType ?? "image/png");
                 continue;
               }
-              if (picked === options[image ? 1 : 0]) {
+              if (image && canEditImage && picked === t("attachmentEditImage")) {
+                const edited = await editImageAttachment(image, async (path) => {
+                  await openImageWithDefaultApp(path);
+                  const finished = await ctx.ui.select(
+                    t("attachmentEditWait"),
+                    [t("attachmentEditDone"), t("attachmentDeny")],
+                  );
+                  if (finished !== t("attachmentEditDone")) throw failure("SCAN_ATTACHMENT");
+                });
+                image = { type: "image", ...edited };
+                editedImages[currentImageIndex] = edited;
+                wasEdited = true;
+                await previewAttachment(ctx, image.data, image.mimeType ?? "image/png");
+                continue;
+              }
+              if (picked === t("attachmentAllow")) {
                 allowed = true;
-                if (approvalKey) approvedImageFingerprints.add(approvalKey);
+                if (approvalKey && !wasEdited) approvedImageFingerprints.add(approvalKey);
               } else throw failure("SCAN_ATTACHMENT");
             }
           }
+          outgoingPayload = replaceImageAttachments(event.payload, editedImages);
         }
         ctx.ui.notify(t("attachmentAllowed"), "warning");
         // Pass configured text through the ordinary redaction path before
         // allowing opaque attachment bytes to accompany it.
         const provider = ctx.model?.provider ?? "unknown";
         const redacted = await redactAroundAttachments(
-          event.payload,
+          outgoingPayload,
           async (text) => {
             const result = await engine.redact(text, provider);
             return typeof result === "string" ? result : text;

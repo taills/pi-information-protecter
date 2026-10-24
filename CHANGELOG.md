@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.14.2 — Edit images before sending / 发送前编辑图片
+
+### Added / 新增
+
+- Add an option to edit supported inline images with the operating system's default image application. The editor receives a private temporary copy; after the user saves over that file and confirms, only the saved image bytes replace the attachment in the provider request. The source attachment is unchanged, temporary files are removed, and request text still follows normal redaction. Support PNG, JPEG, WebP and GIF images up to 25 MiB.
+  新增使用系统默认图片软件编辑支持的内嵌图片。编辑器打开私有临时副本；用户覆盖保存并确认后，仅将保存后的图片数据替换到提供商请求中。原附件不变，临时文件会清理，请求文本仍正常脱敏。支持不超过 25 MiB 的 PNG、JPEG、WebP 与 GIF 图片。
+
 ## 0.14.1 — Review attachments individually / 逐项查看并确认附件
 
 ### Added / 新增

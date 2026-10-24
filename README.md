@@ -151,7 +151,7 @@ Never type a secret as a command argument — `test` is the one exception, becau
 
 ### Attachments
 
-The default `attachments: "ask"` prompts separately for each new attachment. For inline images, choose **Open image** to preview it in the TUI, then return to that image's menu to allow it or cancel the request. Approval applies only to that image's exact content; a different image requires its own confirmation. The same confirmed image content is remembered for the current session so it is not repeatedly prompted from conversation history. Attachments are never inspected or redacted, while other text in the request still goes through normal redaction. Choose `"allow"` to always pass attachments through, or `"deny"` to always cancel them.
+The default `attachments: "ask"` prompts separately for each new attachment. For inline images, choose **Open image** to preview it in the TUI, or **Edit image in default app** to open a private temporary copy with the operating system's image app. Save edits over that same temporary file and return to the menu; only the saved image copy is substituted into the provider request, and the original attachment is not changed. Temporary files are removed after editing. Editing is available for inline PNG, JPEG, WebP and GIF images up to 25 MiB; other image types can still be previewed and allowed. Approval applies only to that image's exact content; a different image requires its own confirmation. The same confirmed image content is remembered for the current session so it is not repeatedly prompted from conversation history. Attachments are never inspected or redacted, while other text in the request still goes through normal redaction. Choose `"allow"` to always pass attachments through, or `"deny"` to always cancel them.
 
 ```json
 { "version": 1, "attachments": "ask", "sensitiveWords": [] }
@@ -437,7 +437,7 @@ pi update npm:pi-information-protecter
 
 ### 附件
 
-默认 `attachments: "ask"`：每个新附件都会单独询问。对于内嵌图片，可先选“打开图片”在 TUI 中预览，再返回该图片的菜单选择允许或取消请求。确认仅适用于该图片的具体内容；不同图片必须分别确认。相同图片内容在本会话中会记住已确认状态，避免随历史记录重复询问。附件本身不会被检查或脱敏，但请求中的其他文本仍会正常脱敏。设为 `"allow"` 可始终放行附件，设为 `"deny"` 则始终取消。
+默认 `attachments: "ask"`：每个新附件都会单独询问。对于内嵌图片，可选“打开图片”在 TUI 中预览，或选“用系统默认软件编辑图片”打开私有临时副本。将修改覆盖保存到同一临时文件后返回菜单；只有保存后的图片副本会替换提供商请求中的附件，原附件不会被修改，编辑结束后临时文件会删除。内嵌 PNG、JPEG、WebP、GIF 图片（不超过 25 MiB）可编辑，其他图片格式仍可预览并选择放行。确认仅适用于该图片的具体内容；不同图片必须分别确认。相同图片内容在本会话中会记住已确认状态，避免随历史记录重复询问。附件本身不会被检查或脱敏，但请求中的其他文本仍会正常脱敏。设为 `"allow"` 可始终放行附件，设为 `"deny"` 则始终取消。
 
 ```json
 { "version": 1, "attachments": "ask", "sensitiveWords": [] }

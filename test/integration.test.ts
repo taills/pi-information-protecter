@@ -142,7 +142,7 @@ for (const mode of ["source", "packed"] as const) {
           imageDecisions++;
           assert.ok(title.includes("Review it before deciding"));
           if (imageDecisions === 1 && options[0] === "Open image") return options[0];
-          return options[1] === "Allow this attachment" ? options[1] : options[0];
+          return options.find((option) => option === "Allow this attachment") ?? options[0];
         }
         return options[0];
       },

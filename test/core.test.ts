@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, parseConfig, type Rule } from "../src/config.ts";
 import { Protecter } from "../src/engine.ts";
-import { hasAttachment, imageAttachments, redactAroundAttachments } from "../src/attachment-gate.ts";
+import { attachmentItems, hasAttachment, redactAroundAttachments, replaceImageAttachments } from "../src/attachment-gate.ts";
 import { blocksConfigAccess } from "../src/guard.ts";
 
 async function fixture(
@@ -255,10 +255,23 @@ test("regex timeout and zero-width runtime matches fail without leaking or hangi
   await assert.rejects(engine.redact("x"));
 });
 
-test("attachment detection is specific and configurable modes validate", async (t) => {
+test("attachment detection is specific and configurable modes validate", async () => {
   assert.equal(hasAttachment({ content: [{ type: "image", data: "opaque" }] }), true);
   assert.equal(hasAttachment({ content: [{ type: "text", text: "image" }] }), false);
-  assert.equal(imageAttachments({ content: [{ type: "image", data: "a" }, { type: "image", data: "b" }] }).length, 2);
+  const payload = { content: [{ type: "image", data: "a" }, { type: "audio", data: "voice" }, { type: "image", data: "b" }] };
+  assert.equal(attachmentItems(payload).length, 3);
+  const replaced = replaceImageAttachments(payload, [
+    { data: "edited-a", mimeType: "image/png" },
+    { data: "edited-b", mimeType: "image/jpeg" },
+  ]) as typeof payload;
+  assert.deepEqual(replaced.content.map((item) => item.data), ["edited-a", "voice", "edited-b"]);
+  assert.deepEqual(payload.content.map((item) => item.data), ["a", "voice", "b"], "the session's original payload is not mutated");
+  const providerImage = { parts: [{ inlineData: { mimeType: "image/png", data: "before" } }] };
+  const providerImageItems = attachmentItems(providerImage);
+  assert.equal(providerImageItems.length, 1);
+  const providerImageEdited = replaceImageAttachments(providerImage, [{ data: "after", mimeType: "image/png" }]) as typeof providerImage;
+  assert.equal(providerImageEdited.parts[0].inlineData.data, "after");
+  assert.equal(providerImage.parts[0].inlineData.data, "before");
   assert.equal(parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "allow" })).attachments, "allow");
   assert.throws(() => parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "sometimes" })));
   const seen: string[] = [];
