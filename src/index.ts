@@ -15,7 +15,8 @@ import { blocksConfigAccess } from "./guard.ts";
 import { redactCompaction, redactTree } from "./compaction.ts";
 import { installRuntimeGuard } from "./guard-runtime.ts";
 import { ignoredCompactionKeys } from "./config.ts";
-import { hasAttachment, redactAroundAttachments } from "./attachment-gate.ts";
+import { hasAttachment, imageAttachments, redactAroundAttachments } from "./attachment-gate.ts";
+import { Image } from "@earendil-works/pi-tui";
 import {
   failure,
   formatDiagnostic,
@@ -24,6 +25,7 @@ import {
 } from "./diagnostics.ts";
 import { count, detectLocale, setLocale, t } from "./locale.ts";
 import { lstat, readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 
 /** Offline test input: inline text, or @<path> for a local regular file. / 离线测试输入：行内文本，或用 @<路径> 指向本地普通文件。 */
@@ -75,6 +77,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // 记录本扩展请求钩子的执行次数，供运行时闸门逐次证明 Pi 仍经钩子传递请求体。
   let hookRuns = 0;
   let bypassReported = false;
+  const approvedImageFingerprints = new Set<string>();
   let healthy = false;
   // Remember the last block so the user can inspect it after the notification.
   // 保留最近一次拦截原因，供通知消失后查看。
@@ -82,7 +85,6 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // Session-scoped compaction decision; the config holds the permanent one.
   // 会话级压缩决定，永久设置保存在配置中。
   let compactChoice: "allow" | "deny" | undefined;
-  let attachmentChoice: "allow" | "deny" | undefined;
   // Uninstalls the model-runtime choke point; set while a session is running.
   // 卸载模型运行时总闸门的函数，会话运行期间有值。
   let releaseGuard: (() => void) | undefined;
@@ -94,6 +96,31 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     const text = formatDiagnostic(value);
     lastBlock = { at: new Date().toISOString(), text };
     return text;
+  };
+  const previewAttachment = async (
+    ctx: Pick<ExtensionContext, "ui">,
+    data: string,
+    mimeType: string,
+  ): Promise<void> => {
+    await ctx.ui.custom((_tui, theme, _keybindings, done) => {
+      const image = new Image(data, mimeType, {
+        fallbackColor: (text) => theme.fg("dim", text),
+      }, { maxWidthCells: 72, maxHeightCells: 24 });
+      return {
+        render(width: number) {
+          return [
+            ...image.render(width),
+            "",
+            theme.fg("dim", t("attachmentPreviewHint")),
+          ];
+        },
+        handleInput(input: string) {
+          if (input === "\u001b" || input === "\r" || input.toLowerCase() === "q")
+            done(undefined);
+        },
+        invalidate() { image.invalidate(); },
+      };
+    }, { overlay: true });
   };
 
   pi.on("session_start", async (_event, ctx) => {
@@ -112,7 +139,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         throw failure("PI_CAPABILITY");
       }
       await engine.initialize();
-      attachmentChoice = undefined;
+      approvedImageFingerprints.clear();
       // Install before reporting health: the paths this guard covers, Pi's own
       // summarizers and nested model calls, have no event to fail closed in.
       // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
@@ -182,19 +209,48 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       if (!compatible()) throw failure("PI_CAPABILITY");
       const mode = engine.attachmentMode;
       if (hasAttachment(event.payload)) {
-        let allowed = false;
-        if (mode === "deny" || attachmentChoice === "deny") allowed = false;
-        else if (mode === "allow" || attachmentChoice === "allow") allowed = true;
-        else if (mode === "ask" && !attachmentChoice) {
-          const options = [t("attachmentAllow"), t("attachmentDeny")];
-          const picked = await ctx.ui.select(
-            `${t("attachmentAskTitle")}\n\n${t("attachmentAskBody")}`,
-            options,
-          );
-          allowed = picked === options[0];
-          if (picked !== undefined) attachmentChoice = allowed ? "allow" : "deny";
+        if (mode === "deny") throw failure("SCAN_ATTACHMENT");
+        if (mode === "ask") {
+          const images = imageAttachments(event.payload);
+          const knownImages = new Set(approvedImageFingerprints);
+          const occurrences = new Map<string, number>();
+          const count = Math.max(images.length, 1);
+          for (let index = 0; index < count; index++) {
+            const image = images[index];
+            const fingerprint = image
+              ? createHash("sha256")
+                  .update(image.mimeType ?? "image/png")
+                  .update("\0")
+                  .update(image.data)
+                  .digest("hex")
+              : undefined;
+            let occurrence = 0;
+            if (fingerprint) {
+              occurrence = (occurrences.get(fingerprint) ?? 0) + 1;
+              occurrences.set(fingerprint, occurrence);
+            }
+            const approvalKey = fingerprint ? `${fingerprint}:${occurrence}` : undefined;
+            if (approvalKey && knownImages.has(approvalKey)) continue;
+            const options = image
+              ? [t("attachmentOpenImage"), t("attachmentAllow"), t("attachmentDeny")]
+              : [t("attachmentAllow"), t("attachmentDeny")];
+            let allowed = false;
+            while (!allowed) {
+              const picked = await ctx.ui.select(
+                `${t("attachmentAskTitle", { index: index + 1, total: count })}\n\n${t("attachmentAskBody")}`,
+                options,
+              );
+              if (image && picked === options[0]) {
+                await previewAttachment(ctx, image.data, image.mimeType ?? "image/png");
+                continue;
+              }
+              if (picked === options[image ? 1 : 0]) {
+                allowed = true;
+                if (approvalKey) approvedImageFingerprints.add(approvalKey);
+              } else throw failure("SCAN_ATTACHMENT");
+            }
+          }
         }
-        if (!allowed) throw failure("SCAN_ATTACHMENT");
         ctx.ui.notify(t("attachmentAllowed"), "warning");
         // Pass configured text through the ordinary redaction path before
         // allowing opaque attachment bytes to accompany it.

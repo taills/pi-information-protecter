@@ -1,5 +1,17 @@
 # Changelog / 更新日志
 
+## 0.14.1 — Review attachments individually / 逐项查看并确认附件
+
+### Added / 新增
+
+- Add an inline TUI preview for each new image in the attachment consent menu. Opening a preview returns to that image's own decision; each newly attached image requires a separate confirmation, and approval does not authorize other images. Exact image content already approved in this session is remembered when repeated in conversation history. Attachments remain uninspected and unredacted; request text still follows normal redaction.
+  在附件确认菜单中为每张新图片增加 TUI 内预览。关闭预览后返回该图片自己的确认菜单；每张新添加的图片都需单独确认，放行不会授权其他图片。本会话中已确认过的相同图片内容在历史记录中重复出现时会记住确认状态。附件仍不检查、不脱敏；请求文本继续正常脱敏。
+
+### Changed / 变更
+
+- Clarify that allowing compaction continues this compaction only after redacting its content; it does not bypass redaction.
+  明确允许压缩仅表示先脱敏再继续本次压缩，不会跳过脱敏。
+
 ## 0.14.0 — Ask before passing attachments / 附件放行前先询问
 
 ### Changed / 变更

@@ -411,7 +411,7 @@ const UI_EN = {
     "SPI Protecter blocked tool access to the protected configuration or audit log; edit it locally.",
   compactAskTitle: "Compact this conversation?",
   compactAskBody:
-    "Pi builds the summarization request internally and never routes it through this extension's redaction, so letting Pi summarize as-is would send the conversation, including protected values, as plaintext.\n\nAllowing here does NOT do that: the conversation Pi is about to summarize is redacted first, and Pi then summarizes the redacted text with the current model. No extra model is needed. The stored summary keeps the replacements, and the model reasons about replacements, so it may describe protected values inaccurately.\n\nThis request will not be blocked if you allow it.",
+    "Pi builds its summary request internally, outside this extension's normal redaction hook. If sent as-is, the conversation—including protected values—could be sent in plaintext.\n\nIf you allow compaction, this extension will redact the content first. Pi will then summarize the redacted content with the current model; no additional model is needed. The summary will retain the replacement values, so the model may not describe protected information accurately.\n\nAllowing compaction does not bypass redaction. It allows this compaction to proceed.",
   compactAllowOnce: "Allow once",
   compactAllowAlways: "Allow for this session",
   compactDenyOnce: "Deny once",
@@ -428,11 +428,14 @@ const UI_EN = {
     "SPI Protecter: compaction allowed for this session. Set \"compaction\" in the local config to make it permanent.",
   compactDenyNotice:
     "SPI Protecter: compaction refused for this session; use /new to start a new session.",
-  attachmentAskTitle: "Allow attachments?",
-  attachmentAskBody: "This request contains image, audio, video or file content that SPI Protecter cannot inspect or redact. Allowing sends it unchanged to the provider.",
-  attachmentAllow: "Allow this request",
+  attachmentAskTitle: "Review attachment {index} of {total}",
+  attachmentAskBody: "This attachment cannot be inspected or redacted by SPI Protecter. Review it before deciding whether to send it.",
+  attachmentOpenImage: "Open image",
+  attachmentAllow: "Allow this attachment",
   attachmentDeny: "Cancel request",
-  attachmentAllowed: "SPI Protecter: attachment allowed for this request without inspection or redaction.",
+  attachmentAllowed: "SPI Protecter: reviewed attachment allowed; its contents are not redacted.",
+  attachmentPreviewTitle: "Attachment preview",
+  attachmentPreviewHint: "Press Esc or Enter to return to the attachment decision.",
 };
 
 type UiKey = keyof typeof UI_EN;
@@ -440,7 +443,7 @@ type UiKey = keyof typeof UI_EN;
 const UI_ZH: Record<UiKey, string> = {
   compactAskTitle: "是否压缩当前会话？",
   compactAskBody:
-    "Pi 在内部构造摘要请求，不经过本扩展的脱敏环节，因此原样让 Pi 生成摘要会将会话内容（包括受保护的值）以明文发送。\n\n在此处允许**不会**这样做：先对 Pi 即将摘要的内容脱敏，再由 Pi 用当前模型对脱敏后的内容生成摘要，无需额外模型。保存下来的摘要保留替换值；且模型推理的是替换值，对受保护值的描述可能不准确。\n\n若选择允许，本次请求不会被拦截。",
+    "Pi 会在内部构造摘要请求，该请求不会经过本扩展的常规脱敏钩子。若直接发送，原始会话内容（包括受保护的值）可能会以明文发出。\n\n选择允许后，本扩展会先对待压缩内容脱敏，再由 Pi 使用当前模型生成摘要，无需额外模型。摘要会保留替换值，因此模型可能无法准确描述相关敏感信息。\n\n允许压缩不会跳过脱敏，只表示继续执行本次压缩。",
   compactAllowOnce: "允许一次",
   compactAllowAlways: "本会话内全部允许",
   compactDenyOnce: "拒绝一次",
@@ -456,11 +459,14 @@ const UI_ZH: Record<UiKey, string> = {
     "SPI Protecter：本会话内允许压缩。如需永久生效，请在本地配置中设置 \"compaction\"。",
   compactDenyNotice:
     "SPI Protecter：本会话内拒绝压缩；可使用 /new 开启新会话。",
-  attachmentAskTitle: "允许发送附件？",
-  attachmentAskBody: "此请求包含 SPI Protecter 无法检查或脱敏的图片、音频、视频或文件内容。允许后会将附件原样发送给提供商。",
-  attachmentAllow: "允许本次请求",
-  attachmentDeny: "取消请求",
-  attachmentAllowed: "SPI Protecter：本次请求的附件未经检查或脱敏，将继续发送。",
+  attachmentAskTitle: "查看附件（{index}/{total}）",
+  attachmentAskBody: "SPI Protecter 无法检查或脱敏此附件。请先查看，再决定是否发送。",
+  attachmentOpenImage: "打开图片",
+  attachmentAllow: "允许发送此附件",
+  attachmentDeny: "取消本次请求",
+  attachmentAllowed: "SPI Protecter：已确认放行此附件；附件内容未经脱敏。",
+  attachmentPreviewTitle: "附件预览",
+  attachmentPreviewHint: "按 Esc 或 Enter 返回附件确认菜单。",
   blockedHeader: "SPI Protecter 已阻止该请求",
   reasonLabel: "原因",
   actionLabel: "处理",

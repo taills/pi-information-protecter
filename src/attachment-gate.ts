@@ -20,8 +20,21 @@ export function hasAttachment(value: unknown, depth = 0): boolean {
   return Object.values(record).some((item) => hasAttachment(item, depth + 1));
 }
 
+export const isImageAttachment = (value: unknown): value is { type: "image"; data: string; mimeType?: string } =>
+  !!value && typeof value === "object" &&
+  (value as Record<string, unknown>).type === "image" &&
+  typeof (value as Record<string, unknown>).data === "string";
+
 const isOpaqueAttachment = (value: Record<string, unknown>) =>
   typeof value.type === "string" && /image|audio|video|document|(^|_)file($|_)/i.test(value.type);
+
+/** Return each inline image block independently, in payload order. */
+export function imageAttachments(value: unknown, depth = 0): Array<{ type: "image"; data: string; mimeType?: string }> {
+  if (depth > 80 || !value || typeof value !== "object") return [];
+  if (isImageAttachment(value)) return [value];
+  const children = Array.isArray(value) ? value : Object.values(value);
+  return children.flatMap((child) => imageAttachments(child, depth + 1));
+}
 const isOpaqueAttachmentKey = (key: string) =>
   /^(inlineData|inline_data|fileData|file_data|image_url|input_audio)$/.test(key);
 

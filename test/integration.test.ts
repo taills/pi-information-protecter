@@ -134,9 +134,16 @@ for (const mode of ["source", "packed"] as const) {
     let aborted = false;
     let injected = 0;
     const uiPreviews: string[] = [];
+    let imageDecisions = 0;
+    let imagePreviews = 0;
     runner.setUIContext({
       select: async (title: string, options: string[]) => {
-        if (title.includes("Allow attachments?")) assert.ok(title.includes("cannot inspect or redact"));
+        if (title.includes("Review attachment")) {
+          imageDecisions++;
+          assert.ok(title.includes("Review it before deciding"));
+          if (imageDecisions === 1 && options[0] === "Open image") return options[0];
+          return options[1] === "Allow this attachment" ? options[1] : options[0];
+        }
         return options[0];
       },
       confirm: async () => true,
@@ -151,7 +158,13 @@ for (const mode of ["source", "packed"] as const) {
       setWidget: () => {},
       setFooter: () => {},
       setHeader: () => {},
-      custom: async () => undefined,
+      custom: async (factory: (tui: unknown, theme: unknown, keys: unknown, done: (result: unknown) => void) => { render(width: number): string[]; handleInput?(input: string): void; invalidate(): void }) => {
+        imagePreviews++;
+        const component = factory({}, { fg: (_color: string, text: string) => text }, {}, () => {});
+        assert.ok(component.render(80).length > 0);
+        component.handleInput?.("\\r");
+        return undefined;
+      },
       editor: async (_title: string, prefill?: string) => {
         uiPreviews.push(prefill ?? "");
         return undefined;
@@ -259,13 +272,25 @@ for (const mode of ["source", "packed"] as const) {
         },
       },
     };
+    const tinyPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pV8AAAAASUVORK5CYII=";
     const attachmentPayload = { content: [
       { type: "text", text: "fake-private-password" },
-      { type: "image", data: "opaque-image-data" },
+      { type: "image", data: tinyPng, mimeType: "image/png" },
+      { type: "image", data: tinyPng, mimeType: "image/png" },
     ] };
     const attachmentOutgoing = (await runner.emitBeforeProviderRequest(attachmentPayload)) as typeof attachmentPayload;
-    assert.equal(attachmentOutgoing.content[1].data, "opaque-image-data");
+    assert.equal(attachmentOutgoing.content[1].data, tinyPng);
+    assert.equal(attachmentOutgoing.content[2].data, tinyPng);
     assert.notEqual(attachmentOutgoing.content[0].text, "fake-private-password");
+    assert.equal(imageDecisions, 3, "opening the first image returns to its confirmation menu; each image has its own decision");
+    assert.equal(imagePreviews, 1);
+    await runner.emitBeforeProviderRequest(attachmentPayload);
+    assert.equal(imageDecisions, 3, "the same confirmed image content is not treated as newly added");
+    const withNewImage = {
+      content: [...attachmentPayload.content, { type: "image" as const, data: tinyPng, mimeType: "image/png" }],
+    };
+    await runner.emitBeforeProviderRequest(withNewImage);
+    assert.equal(imageDecisions, 4, "a new image content fingerprint requires a fresh decision");
     assert.ok(!aborted);
 
     await command.handler("", localCtx);

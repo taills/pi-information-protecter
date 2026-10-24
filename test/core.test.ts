@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, parseConfig, type Rule } from "../src/config.ts";
 import { Protecter } from "../src/engine.ts";
-import { hasAttachment, redactAroundAttachments } from "../src/attachment-gate.ts";
+import { hasAttachment, imageAttachments, redactAroundAttachments } from "../src/attachment-gate.ts";
 import { blocksConfigAccess } from "../src/guard.ts";
 
 async function fixture(
@@ -258,6 +258,7 @@ test("regex timeout and zero-width runtime matches fail without leaking or hangi
 test("attachment detection is specific and configurable modes validate", async (t) => {
   assert.equal(hasAttachment({ content: [{ type: "image", data: "opaque" }] }), true);
   assert.equal(hasAttachment({ content: [{ type: "text", text: "image" }] }), false);
+  assert.equal(imageAttachments({ content: [{ type: "image", data: "a" }, { type: "image", data: "b" }] }).length, 2);
   assert.equal(parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "allow" })).attachments, "allow");
   assert.throws(() => parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "sometimes" })));
   const seen: string[] = [];
