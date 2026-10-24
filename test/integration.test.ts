@@ -79,6 +79,8 @@ for (const mode of ["source", "packed"] as const) {
         readFileSync(join(root, "package.json"), "utf8"),
       );
       assert.deepEqual(manifest.pi.extensions, ["./dist/index.mjs"]);
+      assert.equal(manifest.peerDependencies["@earendil-works/pi-tui"], "*");
+      assert.equal(manifest.dependencies?.["@earendil-works/pi-tui"], undefined);
       // Resolve only through the test host; consumers use Pi's installed peer package.
       // 通过测试宿主解析依赖，实际用户使用 Pi 提供的 peer 包。
       symlinkSync(

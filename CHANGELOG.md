@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.14.3 — Use Pi-provided UI packages / 使用 Pi 宿主提供的界面包
+
+### Fixed / 修复
+
+- Declare `@earendil-works/pi-tui` as a host-provided peer dependency (`*`) instead of installing a duplicate runtime copy. This prevents extension-loader warnings and duplicate TUI modules.
+  将 `@earendil-works/pi-tui` 声明为 Pi 宿主提供的 peer 依赖（`*`），不再安装重复的运行时副本，避免扩展加载器警告和重复 TUI 模块。
+
 ## 0.14.2 — Edit images before sending / 发送前编辑图片
 
 ### Added / 新增
