@@ -430,6 +430,10 @@ const UI_EN = {
     "SPI Protecter: compaction refused for this session; use /new to start a new session.",
   attachmentAskTitle: "Review attachment {index} of {total}",
   attachmentAskBody: "This attachment cannot be inspected or redacted by SPI Protecter. Review it before deciding whether to send it.",
+  attachmentPathLabel: "Local file path",
+  diagnosticRuleEntries: "Matched configuration entries:",
+  attachmentPathUnavailable: "Not provided by Pi; locate the original in the conversation or file picker",
+
   attachmentOpenImage: "Open image",
   attachmentEditImage: "Edit image in default app",
   attachmentEditWait: "The app receives a private temporary copy. Save your edits over that same file, then return here; only the saved image will be sent.",
@@ -464,6 +468,10 @@ const UI_ZH: Record<UiKey, string> = {
     "SPI Protecter：本会话内拒绝压缩；可使用 /new 开启新会话。",
   attachmentAskTitle: "查看附件（{index}/{total}）",
   attachmentAskBody: "SPI Protecter 无法检查或脱敏此附件。请先查看，再决定是否发送。",
+  attachmentPathLabel: "本地文件路径",
+  diagnosticRuleEntries: "涉及的配置条目内容：",
+  attachmentPathUnavailable: "Pi 未提供本地路径；请在会话记录或文件选择器中定位原文件",
+
   attachmentOpenImage: "打开图片",
   attachmentEditImage: "用系统默认软件编辑图片",
   attachmentEditWait: "打开的软件收到的是私有临时副本。请将修改覆盖保存到同一文件，再返回此处；最终只会发送保存后的图片。",

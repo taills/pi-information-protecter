@@ -1,5 +1,21 @@
 # Changelog / 更新日志
 
+## 0.15.0 — Attachment paths and explicit rule conflicts / 附件路径与明确的规则冲突
+
+### Added / 新增
+
+- Show the attachment's local file path in the consent menu when it is known. Pi's image content carries no path, so images read by a tool (for example `read`) are mapped back to the path in that tool call; directly pasted or attached images are reported as having no path.
+  在附件确认菜单中展示已知的本地文件路径。Pi 的图片内容不含路径，因此由工具（如 `read`）读取的图片会按该工具调用中的路径反查；直接粘贴或附加的图片会如实提示无路径。
+- Once an attachment from a known path is allowed, later attachments from the same path are allowed for the rest of the session without asking. Edited images do not approve their path, so the unedited original is never sent silently later.
+  已知路径的附件一经允许，本会话内同一路径的后续附件直接放行，不再询问。编辑过的图片不会记住其路径，避免之后静默发送未编辑的原图。
+- Blocks that name rules (such as `FIXED_OVERLAP`) now list the exact configuration entries for `rule` and `otherRule` in the local notification and `/protecter status`. These entries are never included in tool-call block reasons visible to the model.
+  指明规则的拦截（如 `FIXED_OVERLAP`）现在会在本地通知和 `/protecter status` 中列出 `rule` 与 `otherRule` 对应的完整配置条目；这些条目绝不会出现在模型可见的工具调用拦截原因中。
+
+### Fixed / 修复
+
+- Recognize inline images in Anthropic (`source.type: "base64"`) and OpenAI (`data:` URL in `image_url`) request formats, so they can be previewed and edited instead of only allowed or cancelled. Edited bytes are written back in the same provider format; remote image URLs remain opaque.
+  识别 Anthropic（`source.type: "base64"`）和 OpenAI（`image_url` 中的 `data:` URL）请求格式的内嵌图片，使其可预览和编辑，而不再只能放行或取消。编辑后的数据按原提供商格式写回；远程图片 URL 仍按不透明附件处理。
+
 ## 0.14.3 — Use Pi-provided UI packages / 使用 Pi 宿主提供的界面包
 
 ### Fixed / 修复

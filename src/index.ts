@@ -17,6 +17,7 @@ import { installRuntimeGuard } from "./guard-runtime.ts";
 import { ignoredCompactionKeys } from "./config.ts";
 import {
   attachmentItems,
+  attachmentPaths,
   hasAttachment,
   replaceImageAttachments,
   redactAroundAttachments,
@@ -88,10 +89,16 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   let hookRuns = 0;
   let bypassReported = false;
   const approvedImageFingerprints = new Set<string>();
+  const approvedAttachmentPaths = new Set<string>();
+  // Pi's image content carries no file path; images read by tools are mapped
+  // back to the path in the tool call so the user can locate the original.
+  // Pi 的图片内容不含文件路径；工具读取的图片按调用参数中的路径反查，便于定位原文件。
+  const imageSourcePaths = new Map<string, string>();
+  const imageDataKey = (data: string) => createHash("sha256").update(data).digest("hex");
   let healthy = false;
   // Remember the last block so the user can inspect it after the notification.
   // 保留最近一次拦截原因，供通知消失后查看。
-  let lastBlock: { at: string; text: string } | undefined;
+  let lastBlock: { at: string; text: string; local?: string } | undefined;
   // Session-scoped compaction decision; the config holds the permanent one.
   // 会话级压缩决定，永久设置保存在配置中。
   let compactChoice: "allow" | "deny" | undefined;
@@ -102,10 +109,25 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     const value = (model as { provider?: unknown } | undefined)?.provider;
     return typeof value === "string" ? value : "unknown";
   };
+  /**
+   * Configuration entries named by rule/otherRule, for local display only.
+   * Never put this into text the model can see (tool block reasons).
+   * 诊断中 rule/otherRule 对应的配置条目，仅供本地展示，不得进入模型可见的文本。
+   */
+  const ruleEntries = (value: Diagnostic): string | undefined => {
+    const lines = [...new Set([value.rule, value.otherRule])]
+      .filter((index): index is number => index !== undefined)
+      .flatMap((index) => {
+        const rule = engine.ruleAt(index);
+        return rule === undefined ? [] : [`#${index} ${JSON.stringify(rule)}`];
+      });
+    return lines.length ? `${t("diagnosticRuleEntries")}\n${lines.join("\n")}` : undefined;
+  };
   const record = (value: Diagnostic) => {
     const text = formatDiagnostic(value);
-    lastBlock = { at: new Date().toISOString(), text };
-    return text;
+    const local = ruleEntries(value);
+    lastBlock = { at: new Date().toISOString(), text, local };
+    return local ? `${text}\n${local}` : text;
   };
   const previewAttachment = async (
     ctx: Pick<ExtensionContext, "ui">,
@@ -150,6 +172,8 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       }
       await engine.initialize();
       approvedImageFingerprints.clear();
+      approvedAttachmentPaths.clear();
+      imageSourcePaths.clear();
       // Install before reporting health: the paths this guard covers, Pi's own
       // summarizers and nested model calls, have no event to fail closed in.
       // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
@@ -223,6 +247,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         let outgoingPayload = event.payload;
         if (mode === "ask") {
           const items = attachmentItems(event.payload);
+          const paths = attachmentPaths(event.payload);
           const editedImages: Array<{ data: string; mimeType?: string } | undefined> = [];
           const knownImages = new Set(approvedImageFingerprints);
           const occurrences = new Map<string, number>();
@@ -243,7 +268,8 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               occurrences.set(fingerprint, occurrence);
             }
             const approvalKey = fingerprint ? `${fingerprint}:${occurrence}` : undefined;
-            if (approvalKey && knownImages.has(approvalKey)) {
+            const attachmentPath = paths[index] ?? (image ? imageSourcePaths.get(imageDataKey(image.data)) : undefined);
+            if ((attachmentPath && approvedAttachmentPaths.has(attachmentPath)) || (approvalKey && knownImages.has(approvalKey))) {
               editedImages[currentImageIndex] = undefined;
               continue;
             }
@@ -258,7 +284,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             let wasEdited = false;
             while (!allowed) {
               const picked = await ctx.ui.select(
-                `${t("attachmentAskTitle", { index: index + 1, total: items.length })}\n\n${t("attachmentAskBody")}`,
+                `${t("attachmentAskTitle", { index: index + 1, total: items.length })}\n\n${t("attachmentAskBody")}\n\n${t("attachmentPathLabel")}: ${attachmentPath ?? t("attachmentPathUnavailable")}`,
                 options,
               );
               if (image && picked === options[0]) {
@@ -282,6 +308,10 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               }
               if (picked === t("attachmentAllow")) {
                 allowed = true;
+                // An edited image is substituted only in this request; approving its
+                // path would let the unedited original through on later turns.
+                // 编辑后的图片仅替换本次请求；若记住路径，后续轮次会放行未编辑的原图。
+                if (attachmentPath && !wasEdited) approvedAttachmentPaths.add(attachmentPath);
                 if (approvalKey && !wasEdited) approvedImageFingerprints.add(approvalKey);
               } else throw failure("SCAN_ATTACHMENT");
             }
@@ -362,6 +392,20 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   pi.registerMarkdownTransformer((text, context) =>
     context.messageType === "user" ? text : engine.restoreText(text),
   );
+
+  pi.on("tool_result", (event, ctx) => {
+    // Observe only; never alter the result. / 仅观察，不修改结果。
+    try {
+      const input = event.input as Record<string, unknown>;
+      const candidate = input.path ?? input.file_path ?? input.filePath;
+      if (typeof candidate !== "string" || !candidate.trim()) return;
+      const path = resolve(ctx.cwd, candidate.replace(/^@/, ""));
+      for (const block of event.content)
+        if (block.type === "image") imageSourcePaths.set(imageDataKey(block.data), path);
+    } catch {
+      /* Path lookup is best-effort. / 路径反查仅尽力而为。 */
+    }
+  });
 
   pi.on("tool_call", (event, ctx) => {
     if (!healthy)
@@ -605,7 +649,12 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       }
       // Status repeats the last sanitized block so notifications are recoverable.
       // 状态会重新展示最近一次安全诊断，避免通知消失后无法定位。
-      const last = engine.lastDiagnosticText ?? lastBlock?.text;
+      const engineDiagnostic = engine.lastDiagnostic;
+      const last = engineDiagnostic
+        ? [formatDiagnostic(engineDiagnostic), ruleEntries(engineDiagnostic)].filter(Boolean).join("\n")
+        : lastBlock
+          ? [lastBlock.text, lastBlock.local].filter(Boolean).join("\n")
+          : undefined;
       const summary = t("statusLine", {
         state: t(engine.ready ? "statusReady" : "statusNotReady"),
         rules: count("rules", engine.ruleCount),

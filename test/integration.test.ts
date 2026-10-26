@@ -138,10 +138,15 @@ for (const mode of ["source", "packed"] as const) {
     const uiPreviews: string[] = [];
     let imageDecisions = 0;
     let imagePreviews = 0;
+    const reviewTitles: string[] = [];
+    const reviewOptions: string[][] = [];
+    const hostNotices: string[] = [];
     runner.setUIContext({
       select: async (title: string, options: string[]) => {
         if (title.includes("Review attachment")) {
           imageDecisions++;
+          reviewTitles.push(title);
+          reviewOptions.push(options);
           assert.ok(title.includes("Review it before deciding"));
           if (imageDecisions === 1 && options[0] === "Open image") return options[0];
           return options.find((option) => option === "Allow this attachment") ?? options[0];
@@ -150,7 +155,9 @@ for (const mode of ["source", "packed"] as const) {
       },
       confirm: async () => true,
       input: async () => undefined,
-      notify: () => {},
+      notify: (message: string) => {
+        hostNotices.push(message);
+      },
       onTerminalInput: () => () => {},
       setStatus: () => {},
       setWorkingMessage: () => {},
@@ -293,6 +300,35 @@ for (const mode of ["source", "packed"] as const) {
     };
     await runner.emitBeforeProviderRequest(withNewImage);
     assert.equal(imageDecisions, 4, "a new image content fingerprint requires a fresh decision");
+    assert.ok(reviewTitles.at(-1)!.includes("Local file path: Not provided by Pi"));
+
+    // Provider-shaped inline images (Anthropic base64, OpenAI data URLs) can be
+    // previewed instead of only allowed or cancelled.
+    // 提供商格式的内嵌图片（Anthropic base64、OpenAI data URL）可预览，而不是只能放行或取消。
+    await runner.emitBeforeProviderRequest({ messages: [{ role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJDRA==" } },
+      { type: "image_url", image_url: { url: "data:image/png;base64,QUJDRQ==" } },
+      { type: "input_image", image_url: "data:image/png;base64,QUJDRg==" },
+    ] }] });
+    assert.equal(imageDecisions, 7);
+    for (const options of reviewOptions.slice(-3)) assert.equal(options[0], "Open image");
+
+    // Images read by a tool show their source path; one approval per path.
+    // 工具读取的图片展示来源路径；同一路径只需允许一次。
+    const shotPath = join(dir, "shot.png");
+    await runner.emitToolResult({
+      type: "tool_result", toolName: "read", toolCallId: "read-1", input: { path: shotPath },
+      content: [{ type: "image", data: "UEFUSA==", mimeType: "image/png" }], isError: false, details: undefined,
+    } as never);
+    await runner.emitBeforeProviderRequest({ content: [{ type: "image", data: "UEFUSA==", mimeType: "image/png" }] });
+    assert.equal(imageDecisions, 8);
+    assert.ok(reviewTitles.at(-1)!.includes(`Local file path: ${shotPath}`));
+    await runner.emitToolResult({
+      type: "tool_result", toolName: "read", toolCallId: "read-2", input: { path: shotPath },
+      content: [{ type: "image", data: "UEFUSDI=", mimeType: "image/png" }], isError: false, details: undefined,
+    } as never);
+    await runner.emitBeforeProviderRequest({ content: [{ type: "image", data: "UEFUSDI=", mimeType: "image/png" }] });
+    assert.equal(imageDecisions, 8, "an approved path is not asked again");
     assert.ok(!aborted);
 
     await command.handler("", localCtx);
@@ -556,6 +592,25 @@ for (const mode of ["source", "packed"] as const) {
     assert.ok(auditNotice.includes("stage=audit"));
     assert.ok(!auditNotice.includes("fake-private-password"));
     assert.ok(!auditNotice.includes(auditPath));
+    // Fixed-rule overlaps show both configuration entries locally, never to the model.
+    // 固定规则重叠时在本地展示两条配置条目，绝不提供给模型。
+    writeFileSync(path, JSON.stringify({ version: 1, sensitiveWords: [
+      "unrelated-word",
+      { type: "literal", value: "Apple Inc.", replacement: "Alphabet Inc." },
+      { type: "literal", value: "Inc. Ltd", replacement: "Corp Plc" },
+    ] }));
+    await runner.emit({ type: "session_start", reason: "reload" });
+    assert.deepEqual(await runner.emitBeforeProviderRequest({ text: "Apple Inc. Ltd" }), {});
+    const overlapNotice = hostNotices.at(-1)!;
+    assert.ok(overlapNotice.includes("code=FIXED_OVERLAP"));
+    assert.ok(overlapNotice.includes('#2 {"type":"literal","value":"Apple Inc.","replacement":"Alphabet Inc."}'));
+    assert.ok(overlapNotice.includes('#3 {"type":"literal","value":"Inc. Ltd","replacement":"Corp Plc"}'));
+    await command.handler("status", localCtx);
+    assert.ok(notices.at(-1)!.includes("#3 "));
+    const overlapTool = await runner.emitToolCall(call);
+    assert.equal(overlapTool?.block, true);
+    assert.ok(String(overlapTool?.reason).includes("code=FIXED_OVERLAP"));
+    assert.ok(!String(overlapTool?.reason).includes("Inc. Ltd"), "rule contents never reach the model");
     writeFileSync(path, "invalid-secret-config");
     await runner.emit({ type: "session_start", reason: "reload" });
     assert.deepEqual(

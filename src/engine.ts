@@ -84,6 +84,10 @@ export class Protecter {
   get ruleCount(): number {
     return this.snapshot?.config.sensitiveWords.length ?? 0;
   }
+  ruleAt(oneBasedIndex: number) {
+    if (!Number.isSafeInteger(oneBasedIndex) || oneBasedIndex < 1) return undefined;
+    return this.snapshot?.config.sensitiveWords[oneBasedIndex - 1];
+  }
   /** Compaction handling from the local config; asking is the default. / 来自本地配置的压缩处理方式，默认询问。 */
   get compaction(): CompactionSettings {
     return compactionSettings(this.snapshot?.config.compaction);

@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, parseConfig, type Rule } from "../src/config.ts";
 import { Protecter } from "../src/engine.ts";
-import { attachmentItems, hasAttachment, redactAroundAttachments, replaceImageAttachments } from "../src/attachment-gate.ts";
+import { attachmentItems, attachmentPaths, hasAttachment, redactAroundAttachments, replaceImageAttachments } from "../src/attachment-gate.ts";
 import { blocksConfigAccess } from "../src/guard.ts";
 
 async function fixture(
@@ -260,6 +260,7 @@ test("attachment detection is specific and configurable modes validate", async (
   assert.equal(hasAttachment({ content: [{ type: "text", text: "image" }] }), false);
   const payload = { content: [{ type: "image", data: "a" }, { type: "audio", data: "voice" }, { type: "image", data: "b" }] };
   assert.equal(attachmentItems(payload).length, 3);
+  assert.deepEqual(attachmentPaths({ content: [{ type: "document", filePath: "/tmp/report.pdf" }, { type: "audio" }] }), ["/tmp/report.pdf", undefined]);
   const replaced = replaceImageAttachments(payload, [
     { data: "edited-a", mimeType: "image/png" },
     { data: "edited-b", mimeType: "image/jpeg" },
@@ -272,6 +273,13 @@ test("attachment detection is specific and configurable modes validate", async (
   const providerImageEdited = replaceImageAttachments(providerImage, [{ data: "after", mimeType: "image/png" }]) as typeof providerImage;
   assert.equal(providerImageEdited.parts[0].inlineData.data, "after");
   assert.equal(providerImage.parts[0].inlineData.data, "before");
+  const anthropic = { content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "a1" } }, { type: "image_url", image_url: { url: "data:image/png;base64,b2" } }, { type: "input_image", image_url: "https://remote/x.png" }] };
+  assert.deepEqual(attachmentItems(anthropic).map((item) => item?.data), ["a1", "b2", undefined]);
+  const anthropicEdited = replaceImageAttachments(anthropic, [{ data: "A1", mimeType: "image/jpeg" }, { data: "B2", mimeType: "image/png" }]) as typeof anthropic;
+  assert.deepEqual(anthropicEdited.content[0], { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "A1" } });
+  assert.equal((anthropicEdited.content[1] as { image_url: { url: string } }).image_url.url, "data:image/png;base64,B2");
+  assert.equal(anthropicEdited.content[2].image_url, "https://remote/x.png");
+  assert.equal(anthropic.content[0].source!.data, "a1");
   assert.equal(parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "allow" })).attachments, "allow");
   assert.throws(() => parseConfig(JSON.stringify({ version: 1, sensitiveWords: [], attachments: "sometimes" })));
   const seen: string[] = [];
