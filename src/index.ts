@@ -89,6 +89,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   let hookRuns = 0;
   let bypassReported = false;
   const approvedImageFingerprints = new Set<string>();
+  // Approved (path, exact content) pairs: the same path with changed content
+  // asks again. Attachments whose bytes cannot be read are never remembered.
+  // 已允许的（路径，内容）组合：同路径但内容变化会重新询问；无法读取内容的附件不记忆。
   const approvedAttachmentPaths = new Set<string>();
   // Pi's image content carries no file path; images read by tools are mapped
   // back to the path in the tool call so the user can locate the original.
@@ -269,7 +272,8 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             }
             const approvalKey = fingerprint ? `${fingerprint}:${occurrence}` : undefined;
             const attachmentPath = paths[index] ?? (image ? imageSourcePaths.get(imageDataKey(image.data)) : undefined);
-            if ((attachmentPath && approvedAttachmentPaths.has(attachmentPath)) || (approvalKey && knownImages.has(approvalKey))) {
+            const pathKey = attachmentPath && fingerprint ? `${attachmentPath}\0${fingerprint}` : undefined;
+            if ((pathKey && approvedAttachmentPaths.has(pathKey)) || (approvalKey && knownImages.has(approvalKey))) {
               editedImages[currentImageIndex] = undefined;
               continue;
             }
@@ -311,7 +315,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
                 // An edited image is substituted only in this request; approving its
                 // path would let the unedited original through on later turns.
                 // 编辑后的图片仅替换本次请求；若记住路径，后续轮次会放行未编辑的原图。
-                if (attachmentPath && !wasEdited) approvedAttachmentPaths.add(attachmentPath);
+                if (pathKey && !wasEdited) approvedAttachmentPaths.add(pathKey);
                 if (approvalKey && !wasEdited) approvedImageFingerprints.add(approvalKey);
               } else throw failure("SCAN_ATTACHMENT");
             }

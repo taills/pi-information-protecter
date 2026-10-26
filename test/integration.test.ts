@@ -328,7 +328,12 @@ for (const mode of ["source", "packed"] as const) {
       content: [{ type: "image", data: "UEFUSDI=", mimeType: "image/png" }], isError: false, details: undefined,
     } as never);
     await runner.emitBeforeProviderRequest({ content: [{ type: "image", data: "UEFUSDI=", mimeType: "image/png" }] });
-    assert.equal(imageDecisions, 8, "an approved path is not asked again");
+    assert.equal(imageDecisions, 9, "same path with changed content asks again");
+    await runner.emitBeforeProviderRequest({ content: [
+      { type: "image", data: "UEFUSA==", mimeType: "image/png" },
+      { type: "image", data: "UEFUSA==", mimeType: "image/png" },
+    ] });
+    assert.equal(imageDecisions, 9, "same path with the same content is not asked again");
     assert.ok(!aborted);
 
     await command.handler("", localCtx);

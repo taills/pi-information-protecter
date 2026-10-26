@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.15.1 — Exact-content path approval / 路径授权校验内容一致
+
+### Changed / 变更
+
+- Path-based attachment approval now requires both the same path and the same content. If the content at an approved path changes, the user is asked again; attachments whose content cannot be read are never remembered by path.
+  按路径免询问现在要求路径和内容都相同。已允许路径的内容若有变化会重新询问；无法读取内容的附件不会按路径记住。
+
 ## 0.15.0 — Attachment paths and explicit rule conflicts / 附件路径与明确的规则冲突
 
 ### Added / 新增
