@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { editImageAttachment, supportsImageEditing } from "../src/attachment-editor.ts";
+import { editImageAttachment, supportsImageEditing, viewImageAttachment } from "../src/attachment-editor.ts";
 
 const tinyPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/pV8AAAAASUVORK5CYII=",
@@ -26,6 +26,28 @@ test("edit attachment uses a private copy and returns saved bytes", async () => 
   assert.equal(result.mimeType, "image/png");
   assert.ok(scratchPath);
   assert.equal(existsSync(scratchPath), false, "the temporary image is removed after editing");
+});
+
+test("view attachment shows the exact bytes read-only and removes the copy / 查看附件展示原始字节且只读，并删除副本", async () => {
+  let viewed = "";
+  await viewImageAttachment({ data: tinyPng.toString("base64"), mimeType: "image/png" }, async (path) => {
+    viewed = path;
+    assert.ok(path.endsWith(".png"));
+    assert.equal(statSync(path).mode & 0o777, 0o400);
+    assert.deepEqual(readFileSync(path), tinyPng);
+  });
+  assert.equal(existsSync(viewed), false, "the viewing copy is removed after returning");
+  // Format comes from the bytes, not the declared type. / 格式按字节判断，而非声明类型。
+  await viewImageAttachment({ data: tinyPng.toString("base64"), mimeType: "image/jpeg" }, async (path) => {
+    assert.ok(path.endsWith(".png"));
+  });
+  await assert.rejects(viewImageAttachment({ data: Buffer.from("not an image").toString("base64") }, async () => {}));
+  let failedPath = "";
+  await assert.rejects(viewImageAttachment({ data: tinyPng.toString("base64") }, async (path) => {
+    failedPath = path;
+    throw new Error("viewer failed");
+  }));
+  assert.equal(existsSync(failedPath), false, "the copy is removed even when the viewer fails");
 });
 
 test("edit attachment rejects unsupported formats and unsafe editor output", async () => {

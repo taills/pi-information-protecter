@@ -25,9 +25,10 @@ import {
 import {
   editImageAttachment,
   openImageWithDefaultApp,
+  viewImageAttachment,
   supportsImageEditing,
 } from "./attachment-editor.ts";
-import { Image } from "@earendil-works/pi-tui";
+import * as tui from "@earendil-works/pi-tui";
 import {
   failure,
   formatDiagnostic,
@@ -38,6 +39,8 @@ import { count, detectLocale, setLocale, t } from "./locale.ts";
 import { lstat, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
+
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif|svg)$/i;
 
 /** Offline test input: inline text, or @<path> for a local regular file. / 离线测试输入：行内文本，或用 @<路径> 指向本地普通文件。 */
 const TEST_INPUT_LIMIT = 256 * 1024;
@@ -93,10 +96,12 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   // asks again. Attachments whose bytes cannot be read are never remembered.
   // 已允许的（路径，内容）组合：同路径但内容变化会重新询问；无法读取内容的附件不记忆。
   const approvedAttachmentPaths = new Set<string>();
-  // Pi's image content carries no file path; images read by tools are mapped
-  // back to the path in the tool call so the user can locate the original.
-  // Pi 的图片内容不含文件路径；工具读取的图片按调用参数中的路径反查，便于定位原文件。
-  const imageSourcePaths = new Map<string, string>();
+  // Pi's image content carries no file path; images returned by tools are
+  // mapped back to the producing tool and, when its input names an image file,
+  // that path, so the user can locate the original.
+  // Pi 的图片内容不含文件路径；工具返回的图片会反查到产生它的工具，若调用参数指向图片文件
+  // 则同时记录该路径，便于定位原文件。
+  const imageSources = new Map<string, { tool: string; path?: string }>();
   const imageDataKey = (data: string) => createHash("sha256").update(data).digest("hex");
   let healthy = false;
   // Remember the last block so the user can inspect it after the notification.
@@ -132,13 +137,61 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     lastBlock = { at: new Date().toISOString(), text, local };
     return local ? `${text}\n${local}` : text;
   };
+  /**
+   * True when this terminal can draw images inline (Kitty or iTerm2). Apple
+   * Terminal, tmux and others cannot, and would show only a text placeholder.
+   * 终端能否内联显示图片（Kitty 或 iTerm2）。Apple Terminal、tmux 等不能，只会显示文字占位。
+   */
+  const canPreviewInline = () => {
+    try {
+      return typeof tui.getCapabilities === "function" && !!tui.getCapabilities().images;
+    } catch {
+      return false;
+    }
+  };
   const previewAttachment = async (
+    ctx: Pick<ExtensionContext, "ui">,
+    data: string,
+    mimeType: string,
+    sourcePath?: string,
+  ): Promise<void> => {
+    if (!canPreviewInline()) {
+      // Show the exact bytes to be sent in the system viewer. The full path is
+      // always printed: a launched viewer may still show nothing (SSH, no GUI),
+      // and the copy stays until the user returns, then is deleted.
+      // 用系统看图软件展示即将发送的原始字节。始终打印完整路径：看图软件即便启动也可能未显示
+      // （SSH、无图形界面）；副本保留到用户返回后再删除。
+      try {
+        await viewImageAttachment({ data, mimeType }, async (path) => {
+          let opened = true;
+          try {
+            await openImageWithDefaultApp(path);
+          } catch {
+            opened = false;
+          }
+          const lines = [t(opened ? "attachmentViewWait" : "attachmentViewManual"), "", `${t("attachmentViewPath")}: ${path}`];
+          if (sourcePath) lines.push(`${t("attachmentPathLabel")}: ${sourcePath}`);
+          await ctx.ui.select(lines.join("\n"), [t("attachmentViewDone")]);
+        });
+      } catch {
+        ctx.ui.notify(
+          sourcePath
+            ? `${t("attachmentViewFailed")}\n${t("attachmentPathLabel")}: ${sourcePath}`
+            : t("attachmentViewFailed"),
+          "warning",
+        );
+      }
+      return;
+    }
+    await inlinePreview(ctx, data, mimeType);
+  };
+  const inlinePreview = async (
     ctx: Pick<ExtensionContext, "ui">,
     data: string,
     mimeType: string,
   ): Promise<void> => {
     await ctx.ui.custom((_tui, theme, _keybindings, done) => {
-      const image = new Image(data, mimeType, {
+      const image = new tui.Image(data, mimeType, {
         fallbackColor: (text) => theme.fg("dim", text),
       }, { maxWidthCells: 72, maxHeightCells: 24 });
       return {
@@ -176,7 +229,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       await engine.initialize();
       approvedImageFingerprints.clear();
       approvedAttachmentPaths.clear();
-      imageSourcePaths.clear();
+      imageSources.clear();
       // Install before reporting health: the paths this guard covers, Pi's own
       // summarizers and nested model calls, have no event to fail closed in.
       // 先安装再报告健康状态：该闸门覆盖的 Pi 内部摘要与嵌套模型调用，
@@ -271,7 +324,13 @@ export default function informationProtecter(pi: ExtensionAPI): void {
               occurrences.set(fingerprint, occurrence);
             }
             const approvalKey = fingerprint ? `${fingerprint}:${occurrence}` : undefined;
-            const attachmentPath = paths[index] ?? (image ? imageSourcePaths.get(imageDataKey(image.data)) : undefined);
+            const source = image ? imageSources.get(imageDataKey(image.data)) : undefined;
+            const attachmentPath = paths[index] ?? source?.path;
+            const origin = attachmentPath
+              ? `${t("attachmentPathLabel")}: ${attachmentPath}`
+              : source
+                ? t("attachmentSourceTool", { tool: source.tool })
+                : `${t("attachmentPathLabel")}: ${t("attachmentPathUnavailable")}`;
             const pathKey = attachmentPath && fingerprint ? `${attachmentPath}\0${fingerprint}` : undefined;
             if ((pathKey && approvedAttachmentPaths.has(pathKey)) || (approvalKey && knownImages.has(approvalKey))) {
               editedImages[currentImageIndex] = undefined;
@@ -288,11 +347,13 @@ export default function informationProtecter(pi: ExtensionAPI): void {
             let wasEdited = false;
             while (!allowed) {
               const picked = await ctx.ui.select(
-                `${t("attachmentAskTitle", { index: index + 1, total: items.length })}\n\n${t("attachmentAskBody")}\n\n${t("attachmentPathLabel")}: ${attachmentPath ?? t("attachmentPathUnavailable")}`,
+                `${t("attachmentAskTitle", { index: index + 1, total: items.length })}\n\n${t("attachmentAskBody")}\n\n${origin}`,
                 options,
               );
               if (image && picked === options[0]) {
-                await previewAttachment(ctx, image.data, image.mimeType ?? "image/png");
+                // After an edit the original file no longer matches; do not point at it.
+                // 编辑后内容已与原文件不同，不再指向原文件。
+                await previewAttachment(ctx, image.data, image.mimeType ?? "image/png", wasEdited ? undefined : attachmentPath);
                 continue;
               }
               if (image && canEditImage && picked === t("attachmentEditImage")) {
@@ -400,12 +461,20 @@ export default function informationProtecter(pi: ExtensionAPI): void {
   pi.on("tool_result", (event, ctx) => {
     // Observe only; never alter the result. / 仅观察，不修改结果。
     try {
-      const input = event.input as Record<string, unknown>;
-      const candidate = input.path ?? input.file_path ?? input.filePath;
-      if (typeof candidate !== "string" || !candidate.trim()) return;
-      const path = resolve(ctx.cwd, candidate.replace(/^@/, ""));
-      for (const block of event.content)
-        if (block.type === "image") imageSourcePaths.set(imageDataKey(block.data), path);
+      const images = event.content.filter((block) => block.type === "image");
+      if (!images.length) return;
+      const input = (event.input ?? {}) as Record<string, unknown>;
+      // MCP gateway calls name the real tool in `tool`. / MCP 网关调用在 `tool` 中给出实际工具名。
+      const inner = typeof input.tool === "string" ? input.tool : undefined;
+      const tool = inner ? `${event.toolName} → ${inner}` : event.toolName;
+      // Only an image-file argument is the image's source; a `.pen` or
+      // directory path would point the user at the wrong file.
+      // 只有指向图片文件的参数才是图片来源；`.pen` 或目录路径会指错文件。
+      const nested = input.args && typeof input.args === "object" ? (input.args as Record<string, unknown>) : {};
+      const candidate = [input.path, input.file_path, input.filePath, input.filename, nested.path, nested.filename, nested.filePath]
+        .find((value): value is string => typeof value === "string" && IMAGE_FILE.test(value.trim()));
+      const path = candidate ? resolve(ctx.cwd, candidate.trim().replace(/^@/, "")) : undefined;
+      for (const block of images) imageSources.set(imageDataKey(block.data), { tool, path });
     } catch {
       /* Path lookup is best-effort. / 路径反查仅尽力而为。 */
     }

@@ -1,5 +1,16 @@
 # Changelog / 更新日志
 
+## 0.15.2 — View images in any terminal / 任意终端均可查看图片
+
+### Fixed / 修复
+
+- **Open image** now works in terminals without an inline image protocol (Apple Terminal, tmux and others), where the TUI preview could only show a text placeholder. The exact image to be sent is written to a read-only private temporary copy, opened in the system image viewer, and deleted when the user returns to the decision.
+  在不支持内联图片协议的终端（Apple Terminal、tmux 等）中，TUI 预览只能显示文字占位；“打开图片”现在改为将即将发送的原始图片写入只读私有临时副本，用系统看图软件打开，返回确认菜单后即删除。
+- When an image cannot be shown, its full path is printed so it can be opened manually: the dialog always shows the read-only copy's absolute path (and the original file's path when known), states when the system viewer could not be launched, and keeps the copy until the user returns. If no copy can be made, the notification shows the original file's path when known.
+  无法展示图片时会打印完整路径以便手动打开：对话框始终显示只读副本的绝对路径（已知时同时显示原文件路径），系统看图软件无法启动时会明确说明，副本保留到用户返回为止；若无法生成副本，通知中会给出已知的原文件路径。
+- Tool images without a file path (such as screenshots) now show the tool that produced them, including the inner tool of MCP gateway calls. Only arguments naming an image file are shown as the image's path, so non-image paths such as design files are no longer misreported.
+  无文件路径的工具图片（如截图）现在会展示产生它的工具，包括 MCP 网关调用的实际工具。只有指向图片文件的参数才会作为图片路径展示，设计文件等非图片路径不再被误报。
+
 ## 0.15.1 — Exact-content path approval / 路径授权校验内容一致
 
 ### Changed / 变更

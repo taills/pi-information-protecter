@@ -8,6 +8,7 @@ import {
   readFileSync,
   mkdirSync,
   symlinkSync,
+  existsSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -19,6 +20,11 @@ import {
   type ModelRegistry,
   type ExtensionContextActions,
 } from "@earendil-works/pi-coding-agent";
+import { setCapabilityOverrides } from "@earendil-works/pi-tui";
+
+// Pin inline image support so tests never depend on, or launch, the host's image viewer.
+// 固定内联图片支持，使测试不依赖也不会启动宿主的看图软件。
+setCapabilityOverrides({ images: "kitty" });
 
 for (const mode of ["source", "packed"] as const) {
   test(`real Pi loader and workers (${mode}) / 真实 Pi 加载器与 worker`, async (t) => {
@@ -139,6 +145,8 @@ for (const mode of ["source", "packed"] as const) {
     let imageDecisions = 0;
     let imagePreviews = 0;
     const reviewTitles: string[] = [];
+    let openNextImage = false;
+    const viewDialogs: { title: string; path: string; existed: boolean }[] = [];
     const reviewOptions: string[][] = [];
     const hostNotices: string[] = [];
     runner.setUIContext({
@@ -148,8 +156,15 @@ for (const mode of ["source", "packed"] as const) {
           reviewTitles.push(title);
           reviewOptions.push(options);
           assert.ok(title.includes("Review it before deciding"));
-          if (imageDecisions === 1 && options[0] === "Open image") return options[0];
+          if ((imageDecisions === 1 || openNextImage) && options[0] === "Open image") {
+            openNextImage = false;
+            return options[0];
+          }
           return options.find((option) => option === "Allow this attachment") ?? options[0];
+        }
+        if (title.includes("Full image path")) {
+          const shown = /Full image path: (.+)/.exec(title)?.[1] ?? "";
+          viewDialogs.push({ title, path: shown, existed: existsSync(shown) });
         }
         return options[0];
       },
@@ -334,6 +349,58 @@ for (const mode of ["source", "packed"] as const) {
       { type: "image", data: "UEFUSA==", mimeType: "image/png" },
     ] });
     assert.equal(imageDecisions, 9, "same path with the same content is not asked again");
+
+    // Screenshots and other tool images name their source tool; a non-image
+    // argument such as a design file is never shown as the image's path.
+    // 截图等工具图片展示来源工具；设计文件等非图片参数绝不作为图片路径展示。
+    await runner.emitToolResult({
+      type: "tool_result", toolName: "design_browser", toolCallId: "shot-1", input: { filePath: join(dir, "page.pen"), action: "return-screenshot" },
+      content: [{ type: "image", data: "U0hPVDE=", mimeType: "image/png" }], isError: false, details: undefined,
+    } as never);
+    await runner.emitBeforeProviderRequest({ content: [{ type: "image", data: "U0hPVDE=", mimeType: "image/png" }] });
+    assert.ok(reviewTitles.at(-1)!.includes("Source: image returned by tool design_browser"));
+    assert.ok(!reviewTitles.at(-1)!.includes("page.pen"));
+    await runner.emitToolResult({
+      type: "tool_result", toolName: "mcp", toolCallId: "shot-2", input: { tool: "playwright_browser_take_screenshot", args: { filename: "page.png" } },
+      content: [{ type: "image", data: "U0hPVDI=", mimeType: "image/png" }], isError: false, details: undefined,
+    } as never);
+    await runner.emitBeforeProviderRequest({ content: [{ type: "image", data: "U0hPVDI=", mimeType: "image/png" }] });
+    assert.ok(reviewTitles.at(-1)!.includes(`Local file path: ${resolve(dir, "page.png")}`));
+    assert.equal(imageDecisions, 11);
+
+    // No inline image support and no system viewer: the full path of the
+    // read-only copy (and of the original) is printed for manual opening, the
+    // copy exists while the dialog is open, and is deleted afterwards.
+    // 无内联图片支持且无法打开看图软件：打印只读副本（及原文件）的完整路径供手动打开；
+    // 对话框打开期间副本存在，关闭后即删除。
+    const previousPath = process.env.PATH;
+    setCapabilityOverrides({ images: null });
+    process.env.PATH = mkdtempSync(join(tmpdir(), "spi-no-viewer-"));
+    try {
+      const manualPath = join(dir, "manual.png");
+      await runner.emitToolResult({
+        type: "tool_result", toolName: "read", toolCallId: "read-3", input: { path: manualPath },
+        content: [{ type: "image", data: tinyPng, mimeType: "image/png" }], isError: false, details: undefined,
+      } as never);
+      openNextImage = true;
+      await runner.emitBeforeProviderRequest({ content: [
+        { type: "text", text: "new turn" },
+        { type: "image", data: tinyPng, mimeType: "image/png" },
+        { type: "image", data: tinyPng, mimeType: "image/png" },
+        { type: "image", data: tinyPng, mimeType: "image/png" },
+        { type: "image", data: tinyPng, mimeType: "image/png" },
+      ] });
+    } finally {
+      process.env.PATH = previousPath;
+      setCapabilityOverrides({ images: "kitty" });
+    }
+    assert.equal(viewDialogs.length, 1);
+    const [view] = viewDialogs;
+    assert.ok(view.title.includes("could not be opened automatically"));
+    assert.ok(view.path.endsWith(".png") && view.path.startsWith("/"), "an absolute path is printed");
+    assert.ok(view.existed, "the copy exists while the path is shown");
+    assert.equal(existsSync(view.path), false, "the copy is removed after returning");
+    assert.ok(view.title.includes(`Local file path: ${join(dir, "manual.png")}`));
     assert.ok(!aborted);
 
     await command.handler("", localCtx);

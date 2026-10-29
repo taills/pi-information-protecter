@@ -55,6 +55,29 @@ function imageMimeType(bytes: Buffer): string | undefined {
   return undefined;
 }
 
+/**
+ * Show the exact bytes that will be sent in the OS image viewer, for terminals
+ * without an inline image protocol. The read-only private copy is removed
+ * after `view` returns.
+ * 在不支持内联图片的终端中，用系统看图软件展示即将发送的原始字节；`view` 返回后删除只读私有副本。
+ */
+export async function viewImageAttachment(
+  image: EditableImage,
+  view: (path: string) => Promise<void>,
+): Promise<void> {
+  const bytes = Buffer.from(image.data, "base64");
+  const format = IMAGE_FORMATS[imageMimeType(bytes) ?? ""];
+  if (!format || bytes.length > MAX_EDIT_IMAGE_BYTES) throw failure("SCAN_ATTACHMENT");
+  const directory = await mkdtemp(join(tmpdir(), "pi-protecter-view-"));
+  try {
+    const path = join(directory, `attachment${format.extension}`);
+    await writeFile(path, bytes, { mode: 0o400, flag: "wx" });
+    await view(path);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 /** Safely edit a private temporary copy and return the saved image bytes. / 安全编辑私有临时副本并返回保存后的图片数据。 */
 export async function editImageAttachment(
   image: EditableImage,
