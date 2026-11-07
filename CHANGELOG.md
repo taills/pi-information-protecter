@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.15.3 — Pi 1.5.x compatibility / 兼容 Pi 1.5.x
+
+### Changed / 变更
+
+- Mark Pi 1.5.x as suite-verified. Compatibility remains capability-based; the verified-version range only controls the one-time unverified-version notice.
+  将 Pi 1.5.x 标记为已通过完整测试验证。兼容性仍由能力探测决定；已验证版本范围仅控制是否显示一次未验证版本提示。
+
 ## 0.15.2 — View images in any terminal / 任意终端均可查看图片
 
 ### Fixed / 修复

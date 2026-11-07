@@ -104,14 +104,15 @@ test("verified releases are announced, not enforced / 已验证版本用于提�
     "1.2.0",
     "1.3.0",
     "1.4.0",
+    "1.5.0",
   ])
     assert.equal(isVerified(version), true, `should be verified: ${version}`);
   // Unverified only means "announce once"; the capability probe still decides.
   // 未验证仅意味着"提示一次"，判断仍由能力探测负责。
-  for (const version of ["0.83.0", "1.5.0", "2.0.0", "", "not-a-version"])
+  for (const version of ["0.83.0", "1.6.0", "2.0.0", "", "not-a-version"])
     assert.equal(isVerified(version), false, `should not be verified: ${version}`);
   assert.match(VERIFIED_PI, /0\.84\.0/);
-  assert.match(VERIFIED_PI, /1\.4\.x/);
+  assert.match(VERIFIED_PI, /1\.5\.x/);
 });
 
 test("the capability failure points at the issue tracker / 能力失败指向问题反馈地址", (t) => {

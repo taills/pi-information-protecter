@@ -35,7 +35,7 @@ export const ISSUE_URL =
  * are announced once, because the capability probe, not this list, is the gate.
  * 已运行完整测试的版本。更高版本不会被拒绝，只提示一次，因为门禁是能力探测而非本清单。
  */
-export const VERIFIED_PI = "0.84.0-0.84.x, 0.85.1-0.87.x, 0.99.x, 1.2.0-1.4.x";
+export const VERIFIED_PI = "0.84.0-0.84.x, 0.85.1-0.87.x, 0.99.x, 1.2.0-1.5.x";
 
 /**
  * Capability names are fixed identifiers, never values read from a payload, so
@@ -99,7 +99,7 @@ export function isVerified(version: string): boolean {
   const parsed = /^(\d+)\.(\d+)\.(\d+)/.exec(version);
   if (!parsed) return false;
   const [major, minor, patch] = parsed.slice(1).map(Number);
-  if (major === 1) return minor >= 2 && minor <= 4;
+  if (major === 1) return minor >= 2 && minor <= 5;
   if (major !== 0) return false;
   if (minor === 84) return true;
   if (minor === 85) return patch >= 1;
