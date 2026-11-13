@@ -72,6 +72,13 @@ function imageView(record: Record<string, unknown>): ImageView | undefined {
   return undefined;
 }
 
+/** The inline image a payload node carries, in any supported provider shape. / 任意受支持提供商格式中节点携带的内嵌图片。 */
+export function inlineImageOf(value: unknown): InlineImageAttachment | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? imageView(value as Record<string, unknown>)?.image
+    : undefined;
+}
+
 export const isImageAttachment = (value: unknown): value is InlineImageAttachment =>
   !!value && typeof value === "object" && !Array.isArray(value) && imageView(value as Record<string, unknown>) !== undefined;
 

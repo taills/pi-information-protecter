@@ -3,6 +3,57 @@
   "compaction": {
     "mode": "ask"
   },
+  "detection": {
+    "enabled": false,
+    "model": {
+      "endpoint": "http://127.0.0.1:8080/v1/systemone",
+      "apiKeyEnv": "PI_PROTECTER_SYSTEMONE_KEY",
+      "concurrency": 4,
+      "timeoutMs": 30000,
+      "imageTimeoutMs": 120000
+    },
+    "action": "log",
+    "onError": "block",
+    "targets": {
+      "input": true,
+      "toolResults": true,
+      "request": true
+    },
+    "images": true,
+    "maxChars": 4000,
+    "maxChunks": 8,
+    "maxImageBytes": 8388608,
+    "rules": [
+      {
+        "id": "credential",
+        "instructions": "Does the content contain an actual secret credential value, such as a literal password, API key, access token, private key, or a connection string with an embedded password? Variable names, environment variable references and placeholders without the real value do not count.",
+        "threshold": 0.8,
+        "action": "block"
+      },
+      {
+        "id": "pii",
+        "instructions": "Does the content contain personal information of a real person, such as a national ID number, phone number, home address, bank card number, or personal email address?",
+        "threshold": 0.8
+      },
+      {
+        "id": "id-document",
+        "instructions": "Does the content show an identity document, passport, driver's license, bank card or similar personal certificate, or its number?",
+        "threshold": 0.85,
+        "action": "block"
+      },
+      {
+        "id": "internal",
+        "instructions": "Does the content reveal internal infrastructure details such as private IP addresses, internal hostnames, or internal system URLs?",
+        "threshold": 0.85
+      },
+      {
+        "id": "business",
+        "instructions": "内容是否包含未公开的商业机密，例如合同金额、客户名单、未发布的财务数据或产品路线图？公开信息和普通技术讨论不算。",
+        "threshold": 0.85,
+        "images": false
+      }
+    ]
+  },
   "sensitiveWords": [
     "张三",
     {

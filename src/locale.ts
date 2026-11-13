@@ -225,6 +225,34 @@ const DIAGNOSTIC_EN: Record<string, [string, string]> = {
     "Offline test input exceeds the size limit",
     "Test a smaller file or a shorter excerpt",
   ],
+  CONFIG_DETECTION: [
+    "Invalid detection setting",
+    "Check \"detection\" against the documented fields; rule shows the 1-based index in detection.rules",
+  ],
+  DETECT_HIT: [
+    "System One content detection matched a blocking rule",
+    "Remove the sensitive content, or change that rule's action to \"log\"",
+  ],
+  DETECT_UNAVAILABLE: [
+    "Cannot reach the System One detection service",
+    "Start the local model service, check the endpoint, or run /protecter detect off for this session",
+  ],
+  DETECT_TIMEOUT: [
+    "System One detection timed out",
+    "Use a smaller input, raise timeoutMs, or start the service with more parallel slots",
+  ],
+  DETECT_HTTP: [
+    "System One returned an HTTP error",
+    "400: check rules and image format; 401/403: check the key in apiKeyEnv; 501: load a decision model with vision support",
+  ],
+  DETECT_RESPONSE: [
+    "System One returned an invalid decision",
+    "Check that the endpoint is a System One decision endpoint, not a chat endpoint",
+  ],
+  DETECT_IMAGE: [
+    "Image cannot be checked by System One",
+    "Use PNG, JPEG or WebP under maxImageBytes",
+  ],
 };
 
 const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
@@ -362,6 +390,34 @@ const DIAGNOSTIC_ZH: Record<string, [string, string]> = {
     "离线测试输入超出大小上限",
     "改用更小的文件或更短的片段",
   ],
+  CONFIG_DETECTION: [
+    "检测配置无效",
+    "按文档检查 \"detection\" 字段；rule 为 detection.rules 中从 1 开始的序号",
+  ],
+  DETECT_HIT: [
+    "System One 内容检测命中了阻断规则",
+    "移除敏感内容，或将该规则的动作改为 \"log\"",
+  ],
+  DETECT_UNAVAILABLE: [
+    "无法连接 System One 检测服务",
+    "启动本机模型服务、检查端点，或执行 /protecter detect off 在本会话内暂停检测",
+  ],
+  DETECT_TIMEOUT: [
+    "System One 检测超时",
+    "缩小输入、调大 timeoutMs，或以更多并行槽位启动服务",
+  ],
+  DETECT_HTTP: [
+    "System One 返回 HTTP 错误",
+    "400：检查规则与图片格式；401/403：检查 apiKeyEnv 指向的密钥；501：加载支持视觉的决策模型",
+  ],
+  DETECT_RESPONSE: [
+    "System One 返回的判断无效",
+    "确认端点是 System One 决策接口而非聊天接口",
+  ],
+  DETECT_IMAGE: [
+    "该图片无法由 System One 检测",
+    "使用不超过 maxImageBytes 的 PNG、JPEG 或 WebP",
+  ],
 };
 
 const UI_EN = {
@@ -381,7 +437,7 @@ const UI_EN = {
     "SPI Protecter: no rules configured; edit the local machine config, then /reload.",
   commandDescription: "View local SPI protection records",
   usage:
-    "Usage: /protecter [logs [1-100|clear]|status|reload|test <text>|test @<path>]. Only `test` takes content; never type secrets as other arguments.",
+    "Usage: /protecter [logs [1-100|clear]|status|reload|test <text>|test @<path>|detect ...]. Only `test` and `detect test` take content; never type secrets as other arguments.",
   testPreviewTitle: "Offline redaction test; local only, edits are discarded",
   testRedacted:
     "SPI Protecter: redacted locally ({chars}); nothing was sent to a model. Replacements are now learned for this session.",
@@ -449,6 +505,39 @@ const UI_EN = {
   attachmentAllowed: "SPI Protecter: reviewed attachment allowed; its contents are not redacted.",
   attachmentPreviewTitle: "Attachment preview",
   attachmentPreviewHint: "Press Esc or Enter to return to the attachment decision.",
+  detectSourceInput: "your message",
+  detectSourceTool: "output of tool {tool}",
+  detectSourceRequest: "the model request",
+  detectSourceTest: "the test input",
+  detectHitLog: "SPI Protecter · System One: {source} matched {rules}; recorded.",
+  detectHitBlock: "SPI Protecter · System One blocked {source}: matched {rules}.",
+  detectErrorLog: "SPI Protecter · System One could not check {source} ({codes}); nothing was blocked.",
+  detectErrorAllow: "SPI Protecter · System One could not check {source} ({codes}); allowed because onError is \"allow\".",
+  detectErrorBlock: "SPI Protecter · System One could not check {source} ({codes}); blocked because onError is \"block\". Run /protecter detect off to pause detection for this session.",
+  detectTruncated: "SPI Protecter · System One checked only the first {chars} of {source}; raise maxChunks or maxChars to cover more.",
+  detectInputBlocked: "The message was not sent and is back in the editor.",
+  detectToolWithheld: "[SPI Protecter] Tool output withheld: content detection matched {rules}. The user has been notified; do not try to obtain the same content another way.",
+  detectToolWithheldError: "[SPI Protecter] Tool output withheld: content detection was unavailable and the local policy blocks unchecked content.",
+  detectRemote: "SPI Protecter · System One endpoint {endpoint} is not on this computer, so checked content is sent there in plaintext. A model service deployed on this computer is recommended.",
+  detectStatusBar: "System One · {mode}",
+  detectStatusBarUnavailable: "System One · unavailable",
+  detectModeLog: "log",
+  detectModeBlock: "block",
+  detectModeMixed: "log/block",
+  detectModeOff: "off",
+  detectUsage: "Usage: /protecter detect [status|on|off|log|block|logs|test <text>|test @<path>]. on/off/log/block apply to this session only; edit \"detection\" in the local config to make it permanent.",
+  detectStatus: "System One detection: {state}. Endpoint: {endpoint}. Service: {service}. Rules: {rules}. Concurrency: {concurrency}. On error: {onError}.\nThis session: {scans} scans, {requests} model calls, {hits} hits, {blocked} blocked, {errors} errors.",
+  detectServiceUp: "ok (model {model}, vision {vision}, context {context}, slots {slots})",
+  detectServiceDown: "not reachable",
+  detectSessionChanged: "SPI Protecter · System One for this session: {mode}.",
+  detectTestResult: "SPI Protecter · System One test ({kind}, {elapsed} ms); nothing was sent to the session model.",
+  detectTestRule: "{mark} {rule}: {probability} (threshold {threshold}, {action})",
+  detectTestError: "Errors: {codes}",
+  detectLogsNone: "No detection records.",
+  detectLogsTitle: "Detection records (content is never stored)",
+  detectNoRules: "SPI Protecter · System One: detection is on but detection.rules is empty, so nothing is checked; add rules to the local machine config, then /reload.",
+  detectNotConfigured: "SPI Protecter · System One is not configured. Add \"detection\" with \"model\" and \"rules\" to the local machine config (see protecter.example.json), then /reload.",
+  statusDetection: "Content detection (System One): {mode}; {rules} rule(s).",
 };
 
 type UiKey = keyof typeof UI_EN;
@@ -493,6 +582,39 @@ const UI_ZH: Record<UiKey, string> = {
   attachmentAllowed: "SPI Protecter：已确认放行此附件；附件内容未经脱敏。",
   attachmentPreviewTitle: "附件预览",
   attachmentPreviewHint: "按 Esc 或 Enter 返回附件确认菜单。",
+  detectSourceInput: "你的消息",
+  detectSourceTool: "工具 {tool} 的输出",
+  detectSourceRequest: "模型请求",
+  detectSourceTest: "测试输入",
+  detectHitLog: "SPI Protecter · System One：{source}命中 {rules}，已记录。",
+  detectHitBlock: "SPI Protecter · System One 已阻断{source}：命中 {rules}。",
+  detectErrorLog: "SPI Protecter · System One 无法检测{source}（{codes}），未做阻断。",
+  detectErrorAllow: "SPI Protecter · System One 无法检测{source}（{codes}）；onError 为 \"allow\"，已放行。",
+  detectErrorBlock: "SPI Protecter · System One 无法检测{source}（{codes}）；onError 为 \"block\"，已阻断。可执行 /protecter detect off 在本会话内暂停检测。",
+  detectTruncated: "SPI Protecter · System One 仅检测了{source}的前 {chars}；如需覆盖更多，请调大 maxChunks 或 maxChars。",
+  detectInputBlocked: "该消息未发送，已放回编辑框。",
+  detectToolWithheld: "[SPI Protecter] 工具输出已被拦截：内容检测命中 {rules}。已提醒用户；请勿通过其他方式获取同一内容。",
+  detectToolWithheldError: "[SPI Protecter] 工具输出已被拦截：内容检测不可用，本地策略禁止发送未经检测的内容。",
+  detectRemote: "SPI Protecter · System One 端点 {endpoint} 不在本机，待检测内容会以明文发送到该地址。建议使用部署在本机的模型服务。",
+  detectStatusBar: "System One · {mode}",
+  detectStatusBarUnavailable: "System One · 不可用",
+  detectModeLog: "记录",
+  detectModeBlock: "阻断",
+  detectModeMixed: "记录/阻断",
+  detectModeOff: "关闭",
+  detectUsage: "用法：/protecter detect [status|on|off|log|block|logs|test <文本>|test @<路径>]。on/off/log/block 仅对本会话生效；如需永久生效，请编辑本地配置中的 \"detection\"。",
+  detectStatus: "System One 检测：{state}。端点：{endpoint}。服务：{service}。规则：{rules}。并发：{concurrency}。出错时：{onError}。\n本会话：扫描 {scans} 次，模型调用 {requests} 次，命中 {hits} 次，阻断 {blocked} 次，错误 {errors} 次。",
+  detectServiceUp: "正常（模型 {model}，视觉 {vision}，上下文 {context}，槽位 {slots}）",
+  detectServiceDown: "无法连接",
+  detectSessionChanged: "SPI Protecter · 本会话的 System One 检测：{mode}。",
+  detectTestResult: "SPI Protecter · System One 测试（{kind}，{elapsed} 毫秒）；未向会话模型发送任何内容。",
+  detectTestRule: "{mark} {rule}：{probability}（阈值 {threshold}，{action}）",
+  detectTestError: "错误：{codes}",
+  detectLogsNone: "暂无检测记录。",
+  detectLogsTitle: "检测记录（从不保存原文）",
+  detectNoRules: "SPI Protecter · System One：检测已开启，但 detection.rules 为空，不会检测任何内容；请在本地机器配置中添加规则后重载。",
+  detectNotConfigured: "SPI Protecter · System One 尚未配置。请在本地机器配置中添加含 \"model\" 与 \"rules\" 的 \"detection\"（参见 protecter.example.json），然后重载。",
+  statusDetection: "内容检测（System One）：{mode}；规则 {rules} 条。",
   blockedHeader: "SPI Protecter 已阻止该请求",
   reasonLabel: "原因",
   actionLabel: "处理",
@@ -508,7 +630,7 @@ const UI_ZH: Record<UiKey, string> = {
   emptyRules: "SPI Protecter：尚未配置规则，请编辑本地机器配置后重载。",
   commandDescription: "查看本地保护记录",
   usage:
-    "用法：/protecter [logs [1-100|clear]|status|reload|test <文本>|test @<路径>]。仅 test 接受内容，其他参数不要输入敏感内容。",
+    "用法：/protecter [logs [1-100|clear]|status|reload|test <文本>|test @<路径>|detect ...]。仅 test 与 detect test 接受内容，其他参数不要输入敏感内容。",
   testPreviewTitle: "离线脱敏测试，仅本地显示，编辑不会保存",
   testRedacted:
     "SPI Protecter：已在本地脱敏（{chars}），未向任何模型发送内容。替换关系已记入本会话映射。",

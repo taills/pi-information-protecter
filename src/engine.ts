@@ -7,6 +7,7 @@ import {
   compactionSettings,
   type CompactionMode,
   type CompactionSettings,
+  type Config,
 } from "./config.ts";
 import {
   failure,
@@ -62,6 +63,10 @@ export class Protecter {
       this.lastError = safe.diagnostic;
       throw safe;
     }
+  }
+  /** Raw detection settings of the loaded configuration. / 已加载配置中的检测设置。 */
+  get detectionConfig(): Config["detection"] {
+    return this.snapshot?.config.detection;
   }
   get configPath(): string {
     return this.snapshot?.path ?? "";

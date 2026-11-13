@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 import { failure, ProtectionError, sanitizeError } from "./diagnostics.ts";
+import { validateDetection, type DetectionConfig } from "./detector/settings.ts";
 
 export type Rule =
   | string
@@ -63,6 +64,8 @@ export interface Config {
   sensitiveWords: Rule[];
   compaction?: CompactionMode | CompactionSettings;
   attachments?: "ask" | "allow" | "deny";
+  /** Optional System One content detection. / 可选的 System One 内容检测。 */
+  detection?: DetectionConfig;
 }
 export const DEFAULT_CONFIG: Config = { version: 1, sensitiveWords: [] };
 /** Asking is the default: compaction stays visible instead of silent. / 默认询问，不让压缩静默发生。 */
@@ -126,7 +129,7 @@ export function parseConfig(raw: string): Config {
       value.version !== 1 ||
       !Array.isArray(value.sensitiveWords) ||
       Object.keys(value).some(
-        (k) => !["version", "sensitiveWords", "compaction", "attachments"].includes(k),
+        (k) => !["version", "sensitiveWords", "compaction", "attachments", "detection"].includes(k),
       )
     )
       throw failure("CONFIG_SCHEMA");
@@ -134,6 +137,8 @@ export function parseConfig(raw: string): Config {
       validateCompaction((value as { compaction?: unknown }).compaction);
     if (Object.hasOwn(value, "attachments") && !["ask", "allow", "deny"].includes((value as { attachments?: string }).attachments ?? ""))
       throw failure("CONFIG_ATTACHMENT");
+    if (Object.hasOwn(value, "detection"))
+      validateDetection((value as { detection?: unknown }).detection);
     if (value.sensitiveWords.length > 1000)
       throw failure("CONFIG_SIZE", { limit: 1000 });
     const definitions = new Map<string, string | undefined>();

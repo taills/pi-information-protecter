@@ -51,7 +51,7 @@ export function blocksConfigAccess(
   if (["bash", "powershell"].includes(tool)) {
     const command = typeof input.command === "string" ? input.command : "";
     if (
-      /protecter(?:\.[a-f0-9]{32})?\.jsonl?|\.protecter-migration/i.test(
+      /protecter(?:\.[a-f0-9]{32})?(?:\.detections)?\.jsonl?|\.protecter-migration/i.test(
         command,
       ) ||
       command.includes(configPath)
@@ -67,7 +67,7 @@ export function blocksConfigAccess(
       cwd,
     );
     const real = canonical(path);
-    const auditName = /^protecter\.[a-f0-9]{32}\.jsonl(?:\.lock)?$/;
+    const auditName = /^protecter\.[a-f0-9]{32}(?:\.detections)?\.jsonl(?:\.lock)?$/;
     const auditAlias = readdirSync(dirname(target))
       .filter((name) => auditName.test(name))
       .some((name) => sameFile(path, resolve(dirname(target), name)));

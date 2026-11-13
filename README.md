@@ -95,7 +95,7 @@ Tips that matter in practice:
 
 - **Be precise.** A rule like `.` or "all digits" rewrites model names, IDs and tool schemas, and breaks requests.
 - **Avoid very short matches.** They cannot be replaced uniquely, and the request is blocked with `SCAN_UNIQUE_FAILED`. Prefer something like `[A-Za-z0-9._~+/-]{16,}`.
-- **Review patterns copied from examples.** [`protecter.example.json`](protecter.example.json) has ready-made rules for internal domains, emails, IPv4/IPv6, phone numbers and bearer tokens. None are enabled automatically, and broad address rules also match documentation examples and dependency hosts.
+- **Review patterns copied from examples.** [`protecter.example.json`](protecter.example.json) has ready-made rules for internal domains, emails, IPv4/IPv6, phone numbers and bearer tokens, plus a disabled [content detection](#content-detection-system-one) setup. None are enabled automatically, and broad address rules also match documentation examples and dependency hosts.
 - In JSON, write backslashes as `\\`. Flags `g i m s u` are supported (`g` is automatic); `/pattern/flags` shorthand is not.
 - A fixed `replacement` is a **reserved alias**: if the model writes that same text by itself, it is restored too. Choose distinctive values; fixed aliases also reveal more meaning than random ones.
 - Limits: 1000 rules, 8192 characters per rule, 2-second scan, 8 MiB request. Exceeding a limit blocks the request instead of sending plaintext.
@@ -177,6 +177,84 @@ One exception: `/compact <instruction>` reads the instruction from Pi's own stat
 
 `compaction.provider`, `compaction.model`, `compaction.contextWindow` and `compaction.reserveTokens` configured a separate summarization model before 0.11.0. They are still accepted so an upgrade cannot break a working setup, but they do nothing; remove them.
 
+### Content detection (System One)
+
+Rules only catch values you listed. Optional **content detection** also asks a local [System One](https://github.com/ggml-org/llama.cpp) decision model whether content *looks* sensitive, such as a password you never configured, an ID card in a screenshot, or an internal hostname. It checks text and images in three places:
+
+| Where | What | On a blocking hit |
+| --- | --- | --- |
+| Your message (`input`) | Typed text and attached images | Not sent; the text goes back into the editor |
+| Tool output (`tool_result`) | Text and images a tool returned | Replaced by a short notice naming only the rule IDs |
+| Model request (`before_provider_request`) | Anything that skipped both, such as context files, injected messages or resumed history | Request blocked (`DETECT_HIT`) |
+
+A hit always shows in the terminal. Each rule's action is either **`log`** (notify and record) or **`block`**. The model cannot say *where* a match is, so detection never rewrites content; redaction rules still run as before.
+
+**Everything lives in the local machine configuration**, next to `sensitiveWords`: the model service under `detection.model` and the rules under `detection.rules`. Nothing is built in. Without a `detection` section nothing is checked, and with an empty `rules` list startup warns, like an empty `sensitiveWords`. The section is validated at load time; an invalid one fails the whole configuration closed (`CONFIG_DETECTION`). When older configuration files are migrated, rules are combined like sensitive words (identical rules kept once; one ID defined two ways is rejected), the stricter `action` and `onError` win, and the service settings come from the machine's own file.
+
+[`protecter.example.json`](protecter.example.json) contains a complete example with five tested rules (`credential`, `pii`, `id-document`, `internal`, `business`). It ships with `"enabled": false`; set it to `true` once the model service is running. A shorter example:
+
+```json
+{
+  "version": 1,
+  "sensitiveWords": [],
+  "detection": {
+    "model": {
+      "endpoint": "http://127.0.0.1:8080/v1/systemone",
+      "apiKeyEnv": "PI_PROTECTER_SYSTEMONE_KEY",
+      "concurrency": 4
+    },
+    "action": "log",
+    "onError": "block",
+    "rules": [
+      { "id": "credential", "instructions": "Does the content contain an actual secret credential value, such as a literal password, API key, access token or private key? Variable names and placeholders do not count.", "threshold": 0.8, "action": "block" },
+      { "id": "pii", "instructions": "Does the content contain personal information of a real person, such as an ID number, phone number or home address?", "threshold": 0.8 }
+    ]
+  }
+}
+```
+
+**Deploy the model on your own computer.** Checked content is sent to the endpoint in plaintext, so run the service locally (`llama-server` with a Clef/System One decision model) and use a loopback endpoint. A non-local endpoint triggers a warning at startup.
+
+`detection.model`, the model service:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `endpoint` | required | System One decision endpoint; no credentials or query string in the URL |
+| `name` | — | Model ID, only for routing servers; omit for a single-model `llama-server` |
+| `apiKeyEnv` | — | Name of the environment variable holding a Bearer key; the key is never stored in the file |
+| `concurrency` | `4` | Detection requests in flight at once |
+| `timeoutMs` / `imageTimeoutMs` | `30000` / `120000` | Per-request timeout |
+
+`detection`, behaviour and rules:
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `true` | Turn detection off without deleting the settings |
+| `action` | `log` | Action for rules without their own `action` |
+| `onError` | `block` | Applies only when a **blocking** rule could not be evaluated (service down, timeout, bad image): `block` or `allow` |
+| `targets` | all `true` | `input`, `toolResults`, `request` |
+| `images` | `true` | Check images (PNG, JPEG, WebP up to `maxImageBytes`, default 8 MiB) |
+| `maxChars` / `maxChunks` | `4000` / `8` | Long text is split into overlapping chunks; text beyond the limit is not checked and you are told so |
+| `rules` | required | Up to 32 yes/no rules: `id`, `instructions` (any language), `threshold` (default 0.8), `action`, `images` (default `true`) |
+
+**Rules run in parallel.** Every chunk and image is checked against every rule as a separate request, and all of them start together, limited only by `concurrency`, so adding a rule does not add a full round of waiting. The server decides how many it actually evaluates at once: start it with `llama-server --parallel N` (N ≥ the number of rules) to benefit. A single-slot server queues them. As soon as one rule produces a blocking hit, the check stops waiting for slower rules.
+
+**Waiting only happens when something can block.** If every rule's action is `log`, detection runs in the background and never delays Pi. Results are cached by content hash and shared between concurrent checks, so text already checked at input or in a tool result is not checked again in the model request. Model replies and tool declarations are not checked. If the service is down and nothing is blocked, the warning repeats at most once a minute.
+
+Probabilities are not calibrated for your data. Run `/protecter detect test` on real samples and adjust each `threshold` before switching a rule to `block`.
+
+| Command | What it does |
+| --- | --- |
+| `/protecter detect` / `detect status` | Mode, endpoint, service health (model, vision, context, slots), rules, session counters |
+| `/protecter detect test <text>` / `test @<path>` | Show every rule's probability for a text, a text file, or a PNG/JPEG/WebP image |
+| `/protecter detect on` / `off` | Turn the configured detection on or off for this session |
+| `/protecter detect log` / `block` | Use one action for all configured rules in this session |
+| `/protecter detect logs` | Recent detection records |
+
+Session overrides only adjust what the configuration defines and end at reload; edit `detection` in the local machine configuration to make a change permanent. Hits and errors are appended to `protecter.<machineHash>.detections.jsonl` (`0600`) with time, source, rule IDs, probabilities, action and a SHA-256 of the content. **The content itself is never stored.** Tools are blocked from reading this file, like the audit log.
+
+Detection does not cover Pi's own summarization calls (compaction, `/tree`, `/bug`) or model calls made by other extensions; those are still redacted by the runtime guard.
+
 ## Private audit log
 
 Every successful redaction is appended to `protecter.<machineHash>.jsonl` next to the configuration: time, provider, the original value, the fake value and a request ID.
@@ -256,6 +334,7 @@ Write fictional rules into `$PI_CODING_AGENT_DIR/protecter.json`, start Pi, and 
 | `src/guard.ts` | Blocks tool access to the configuration and audit log |
 | `src/diagnostics.ts`, `src/locale.ts` | Error codes, stages and bilingual messages |
 | `src/compat.ts` | The capability probe and the verified-release list |
+| `src/detector/` | System One content detection: settings, HTTP client, parallel detector with cache and circuit breaker, unit extraction, detection log |
 
 ### Debugging workflow
 
@@ -379,7 +458,7 @@ pi update npm:pi-information-protecter
 
 - **要精确。** 像 `.` 或"所有数字"这样的规则会改写模型名、ID 与工具结构，导致请求失败。
 - **避免过短的匹配。** 它们无法生成唯一替换值，请求会以 `SCAN_UNIQUE_FAILED` 被拦截。建议写成 `[A-Za-z0-9._~+/-]{16,}` 之类。
-- **核对从示例复制的正则。** [`protecter.example.json`](protecter.example.json) 提供了内部域名、邮箱、IPv4/IPv6、手机号与 Bearer 令牌的现成规则，它们都不会自动启用；过宽的地址规则也会命中文档示例和依赖主机名。
+- **核对从示例复制的正则。** [`protecter.example.json`](protecter.example.json) 提供了内部域名、邮箱、IPv4/IPv6、手机号与 Bearer 令牌的现成规则，以及默认关闭的[内容检测](#内容检测system-one)配置，它们都不会自动启用；过宽的地址规则也会命中文档示例和依赖主机名。
 - JSON 中反斜杠要写成 `\\`。支持 `g i m s u` 标志（`g` 自动添加）；不支持 `/pattern/flags` 简写。
 - 固定 `replacement` 是**保留别名**：若模型自己写出同样的文本，也会被还原。请选择独特的值；固定别名也比随机值暴露更多语义。
 - 限制：1000 条规则、每条 8192 字符、扫描 2 秒、请求 8 MiB。超限会拦截请求，而不是发送明文。
@@ -463,6 +542,84 @@ pi update npm:pi-information-protecter
 
 `compaction.provider`、`compaction.model`、`compaction.contextWindow` 与 `compaction.reserveTokens` 在 0.11.0 之前用于配置独立的摘要模型。它们仍被接收，以免升级后破坏可用环境，但已不起作用，请删除。
 
+### 内容检测（System One）
+
+规则只能拦住你列出的值。可选的**内容检测**会额外询问本机的 [System One](https://github.com/ggml-org/llama.cpp) 决策模型：这段内容*看起来*是否敏感，比如没配置过的密码、截图里的身份证、内网主机名。文本和图片都会检测，检测位置有三处：
+
+| 位置 | 内容 | 阻断命中时 |
+| --- | --- | --- |
+| 你的消息（`input`） | 输入的文本与附带的图片 | 不发送，文本放回编辑框 |
+| 工具输出（`tool_result`） | 工具返回的文本与图片 | 替换为一条简短说明，只包含规则 ID |
+| 模型请求（`before_provider_request`） | 绕过前两处的内容，如上下文文件、注入的消息、恢复的历史 | 拦截请求（`DETECT_HIT`） |
+
+命中时一定会在终端提示。每条规则的动作是 **`log`**（提示并记录）或 **`block`**（阻断）。模型无法指出命中位置，所以检测从不改写内容；脱敏规则照常执行。
+
+**所有设置都保存在本地机器配置中**，与 `sensitiveWords` 放在一起：模型服务在 `detection.model`，规则在 `detection.rules`。没有任何内置项。没有 `detection` 时不做检测；`rules` 为空时，启动会像 `sensitiveWords` 为空一样给出提示。该段配置在加载时校验，无效时整份配置失败即阻断（`CONFIG_DETECTION`）。迁移旧配置文件时，规则像敏感词一样合并（相同规则只保留一份，同一 ID 有两种定义则拒绝），`action` 与 `onError` 取更严格者，服务设置取自本机文件。
+
+[`protecter.example.json`](protecter.example.json) 提供了完整示例，包含五条已验证的规则（`credential`、`pii`、`id-document`、`internal`、`business`）。示例默认 `"enabled": false`，模型服务启动后改为 `true`。简短示例：
+
+```json
+{
+  "version": 1,
+  "sensitiveWords": [],
+  "detection": {
+    "model": {
+      "endpoint": "http://127.0.0.1:8080/v1/systemone",
+      "apiKeyEnv": "PI_PROTECTER_SYSTEMONE_KEY",
+      "concurrency": 4
+    },
+    "action": "log",
+    "onError": "block",
+    "rules": [
+      { "id": "credential", "instructions": "Does the content contain an actual secret credential value, such as a literal password, API key, access token or private key? Variable names and placeholders do not count.", "threshold": 0.8, "action": "block" },
+      { "id": "pii", "instructions": "内容是否包含真实个人的身份证号、手机号或家庭住址等个人信息？", "threshold": 0.8 }
+    ]
+  }
+}
+```
+
+**请在自己的电脑上部署模型。** 待检测内容会以明文发送到端点，请在本机运行服务（`llama-server` 加载 Clef/System One 决策模型），并使用回环地址。端点不在本机时，启动时会提示。
+
+`detection.model`，模型服务：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `endpoint` | 必填 | System One 决策接口；URL 中不得包含凭据或查询参数 |
+| `name` | — | 模型 ID，仅路由型服务需要；单模型 `llama-server` 省略即可 |
+| `apiKeyEnv` | — | 存放 Bearer 密钥的环境变量名；密钥不写入文件 |
+| `concurrency` | `4` | 同时在途的检测请求数 |
+| `timeoutMs` / `imageTimeoutMs` | `30000` / `120000` | 单次请求超时 |
+
+`detection`，行为与规则：
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `enabled` | `true` | 关闭检测但保留配置 |
+| `action` | `log` | 未单独设置 `action` 的规则使用的动作 |
+| `onError` | `block` | 仅当**阻断**规则无法完成评估（服务不可用、超时、图片不支持）时生效：`block` 或 `allow` |
+| `targets` | 全部 `true` | `input`、`toolResults`、`request` |
+| `images` | `true` | 检测图片（PNG、JPEG、WebP，不超过 `maxImageBytes`，默认 8 MiB） |
+| `maxChars` / `maxChunks` | `4000` / `8` | 长文本切分为相互重叠的分段；超出部分不检测，并会提示 |
+| `rules` | 必填 | 最多 32 条是/否规则：`id`、`instructions`（任意语言）、`threshold`（默认 0.8）、`action`、`images`（默认 `true`） |
+
+**规则并行执行。** 每个分段和图片与每条规则组成独立请求，全部同时发起，仅受 `concurrency` 限制，因此增加规则不会多等一轮。服务端实际同时评估几个由它自己决定：以 `llama-server --parallel N`（N ≥ 规则数）启动才能受益，单槽位服务会排队处理。一旦某条规则产生阻断命中，就不再等待较慢的规则。
+
+**只有可能阻断时才需要等待。** 若所有规则的动作都是 `log`，检测在后台运行，从不拖慢 Pi。结果按内容哈希缓存，并发检查共享在途请求，所以已在输入或工具结果中检测过的文本，在模型请求中不会重复检测。模型回复和工具声明不检测。服务不可用且未阻断时，提示每分钟最多出现一次。
+
+概率未针对你的数据校准。把规则改为 `block` 之前，请用 `/protecter detect test` 跑一些真实样本，调整各自的 `threshold`。
+
+| 命令 | 作用 |
+| --- | --- |
+| `/protecter detect` / `detect status` | 模式、端点、服务状态（模型、视觉、上下文、槽位）、规则、本会话计数 |
+| `/protecter detect test <文本>` / `test @<路径>` | 显示文本、文本文件或 PNG/JPEG/WebP 图片在每条规则上的概率 |
+| `/protecter detect on` / `off` | 在本会话内开启或关闭已配置的检测 |
+| `/protecter detect log` / `block` | 本会话内所有已配置规则统一使用该动作 |
+| `/protecter detect logs` | 最近的检测记录 |
+
+会话覆盖只调整配置中已定义的内容，重载后失效；要永久修改，请编辑本地机器配置中的 `detection`。命中与错误会追加到 `protecter.<machineHash>.detections.jsonl`（`0600`），包含时间、来源、规则 ID、概率、动作和内容的 SHA-256。**从不保存内容本身。** 与审计日志一样，工具无法读取该文件。
+
+检测不覆盖 Pi 自身的摘要调用（压缩、`/tree`、`/bug`）和其他扩展发起的模型调用；这些调用仍由运行时闸门脱敏。
+
 ## 私有审计日志
 
 每次成功脱敏都会追加到配置旁的 `protecter.<machineHash>.jsonl`：时间、provider、原值、假值与请求 ID。
@@ -542,6 +699,7 @@ pi -e ./src/index.ts
 | `src/guard.ts` | 阻止工具访问配置与审计日志 |
 | `src/diagnostics.ts`、`src/locale.ts` | 错误码、阶段与双语文案 |
 | `src/compat.ts` | 能力探测与已验证版本清单 |
+| `src/detector/` | System One 内容检测：配置、HTTP 客户端、带缓存与熔断的并行检测器、单元提取、检测日志 |
 
 ### 调试流程
 

@@ -57,6 +57,13 @@ const stages = {
   AUDIT_IO: "audit",
   TEST_INPUT: "test",
   TEST_SIZE: "test",
+  CONFIG_DETECTION: "configuration",
+  DETECT_HIT: "detection",
+  DETECT_UNAVAILABLE: "detection",
+  DETECT_TIMEOUT: "detection",
+  DETECT_HTTP: "detection",
+  DETECT_RESPONSE: "detection",
+  DETECT_IMAGE: "detection",
 } as const;
 
 /** Exported so tests can assert every code has catalog text. / 导出以便测试断言每个错误码都有文案。 */

@@ -58,6 +58,19 @@ Fixed targets are reserved literal aliases, not anonymization: they reveal seman
 
 固定目标是保留字面别名，并非匿名化；它会暴露语义，映射学习后模型输出中自然出现的同名内容也会被还原，应选择独特值。不同原文复用别名、敏感目标、子串歧义和匹配器冲突会被拒绝，不猜测反向映射。运行时正则冲突及固定规则部分重叠会拒绝请求。随机占位符在同一实例内保持稳定，但缓存命中仍依赖提供商前缀、模型和路由策略。重载或重启丢弃映射，不从审计恢复。
 
+## Content detection / 内容检测
+
+- Optional System One detection sends the content it checks (text chunks and inline images) **in plaintext** to the configured endpoint. Deploy the decision model on the same computer and keep a loopback endpoint; a non-loopback endpoint is announced at startup. The request is a direct `fetch`, never routed through Pi's model runtime, so it cannot reach a cloud model. Keys come from an environment variable named in `apiKeyEnv`, never from the configuration file.
+  可选的 System One 检测会把待检内容（文本分段与内嵌图片）**以明文**发送到配置的端点。请将决策模型部署在同一台电脑上并保留回环端点；端点不在本机时，启动时会提示。请求是直接的 `fetch`，不经过 Pi 的模型运行时，因此不会发往云端模型。密钥取自 `apiKeyEnv` 指定的环境变量，从不写入配置文件。
+- Detection is probabilistic and adds to, never replaces, rules: it can miss content and flag harmless content, and checked text may try to persuade the model (each rule tells the model to ignore instructions in the content). Keep values that must never leave as `sensitiveWords` rules.
+  检测是概率判断，只是对规则的补充而非替代：可能漏检，也可能误报；被检文本也可能试图诱导模型（每条规则都告知模型忽略内容中的指令）。绝不能外发的值仍应写成 `sensitiveWords` 规则。
+- A blocked message is never added to the session; blocked tool output is replaced before it enters the conversation; a blocked model request fails closed like any other block. When a blocking rule cannot be evaluated, `onError` decides (default `block`). Log-only rules never delay or block anything.
+  被阻断的消息不会进入会话；被阻断的工具输出在进入对话前即被替换；被阻断的模型请求与其他拦截一样失败即阻断。阻断规则无法完成评估时由 `onError` 决定（默认 `block`）。仅记录的规则从不延迟或阻断任何内容。
+- Not covered: Pi's own summarization calls, `/bug`, and model calls by other extensions (still redacted by the runtime guard), text beyond `maxChars × maxChunks` (reported), and model output.
+  不覆盖：Pi 自身的摘要调用、`/bug`、其他扩展发起的模型调用（仍由运行时闸门脱敏）、超出 `maxChars × maxChunks` 的文本（会提示），以及模型输出。
+- The detection log stores rule IDs, probabilities and a SHA-256 of the content, never the content. A hash of short or guessable content can still be confirmed by brute force; treat the file as private.
+  检测日志保存规则 ID、概率与内容的 SHA-256，从不保存内容本身。较短或可猜测内容的哈希仍可被暴力确认，请将该文件视为私密文件。
+
 ## Deployment guidance / 安全部署建议
 
 1. Configure precise rules locally and check status/counts. Empty rules provide no SPI detection.

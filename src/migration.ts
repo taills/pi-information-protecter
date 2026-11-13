@@ -20,6 +20,7 @@ import {
   type Config,
   type Rule,
 } from "./config.ts";
+import { mergeDetection } from "./detector/settings.ts";
 
 export const CONFIG_NAME = /^protecter(?:\.[a-f0-9]{32})?\.json$/;
 export interface Snapshot {
@@ -122,6 +123,13 @@ export function mergeConfigs(configs: Config[]): Config {
   // Strictest attachment policy wins across migrated files: deny > ask > allow.
   const attachmentModes = configs.map((config) => config.attachments).filter((value): value is "ask" | "allow" | "deny" => value !== undefined);
   if (attachmentModes.length) merged.attachments = (["deny", "ask", "allow"] as const).find((value) => attachmentModes.includes(value));
+  // Detection merges like the settings above: rules are combined, the stricter
+  // action wins, and the service comes from the machine file (sorted first).
+  // 检测按上述设置的方式合并：规则合并、动作取更严格者、服务取自本机文件（排在最前）。
+  const detection = mergeDetection(
+    configs.map((config) => config.detection).filter((value) => value !== undefined),
+  );
+  if (detection !== undefined) merged.detection = detection;
   const raw = JSON.stringify(merged);
   if (Buffer.byteLength(raw) > 1024 * 1024)
     throw failure("CONFIG_SIZE", {

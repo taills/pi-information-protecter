@@ -36,6 +36,11 @@ import {
   type Diagnostic,
 } from "./diagnostics.ts";
 import { count, detectLocale, setLocale, t } from "./locale.ts";
+import { Detector, type DetectionReport, type ScanInput } from "./detector/detector.ts";
+import { detectionSettings, isLoopbackEndpoint } from "./detector/settings.ts";
+import { contentUnits, payloadUnits, type DetectUnit } from "./detector/units.ts";
+import { appendDetection, detectionLogPath, readDetections } from "./detector/log.ts";
+import { probeService } from "./detector/client.ts";
 import { lstat, readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { resolve } from "node:path";
@@ -211,6 +216,130 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     }, { overlay: true });
   };
 
+  // ---- System One content detection / System One 内容检测 ----
+  let detector = new Detector(detectionSettings(undefined));
+  /** Terminal notice that also works without a UI (print/JSON mode). / 无 UI（print/JSON 模式）时也能输出的终端提示。 */
+  const say = (ctx: Pick<ExtensionContext, "ui" | "hasUI">, text: string, level: "info" | "warning" | "error") => {
+    try {
+      if (ctx.hasUI === false) process.stderr.write(`${text}\n`);
+      else ctx.ui.notify(text, level);
+    } catch {
+      /* A notice must never break the hook. / 提示失败不得影响钩子。 */
+    }
+  };
+  const detectMode = () => {
+    if (!detector.enabled) return t("detectModeOff");
+    const actions = new Set(detector.settings.rules.map((rule) => detector.actionOf(rule)));
+    return t(actions.size > 1 ? "detectModeMixed" : actions.has("block") ? "detectModeBlock" : "detectModeLog");
+  };
+  const showDetectStatus = (ctx: Pick<ExtensionContext, "ui">) => {
+    try {
+      if (!detector.enabled && !detector.settings.enabled) {
+        ctx.ui.setStatus("protecter-detect", undefined);
+        return;
+      }
+      ctx.ui.setStatus(
+        "protecter-detect",
+        detector.enabled && !detector.available
+          ? t("detectStatusBarUnavailable")
+          : t("detectStatusBar", { mode: detectMode() }),
+      );
+    } catch {
+      /* Status is cosmetic. / 状态栏仅为展示。 */
+    }
+  };
+  /** Highest probability per rule, e.g. "credential 97%, pii 85%". / 每条规则的最高概率。 */
+  const ruleSummary = (report: DetectionReport) => {
+    const best = new Map<string, number>();
+    for (const hit of report.hits) best.set(hit.rule, Math.max(best.get(hit.rule) ?? 0, hit.probability));
+    return [...best].map(([rule, p]) => `${rule} ${Math.round(p * 100)}%`).join(", ");
+  };
+  /** Exact texts this extension put into tool results; never re-checked. / 本扩展写入工具结果的原文，不再重复检测。 */
+  const withheldNotices = new Set<string>();
+  const excludeNotices = (input: ScanInput): ScanInput => ({
+    texts: input.texts.filter((text) => !withheldNotices.has(text)),
+    images: input.images,
+  });
+  const contentHash = (input: ScanInput) => {
+    const hash = createHash("sha256");
+    for (const text of input.texts) hash.update("t\0").update(text).update("\0");
+    for (const image of input.images) if (image.kind === "image") hash.update("i\0").update(image.data).update("\0");
+    return hash.digest("hex");
+  };
+  // A service that is down fails every check; when nothing is blocked, say so
+  // once a minute instead of after every message and tool call.
+  // 服务宕机时每次检测都会失败；未阻断时每分钟提示一次，而不是每条消息、每次工具调用都提示。
+  let lastErrorNotice = { codes: "", at: 0 };
+  const repeatedErrorNotice = (codes: string) => {
+    const now = Date.now();
+    if (lastErrorNotice.codes === codes && now - lastErrorNotice.at < 60_000) return true;
+    lastErrorNotice = { codes, at: now };
+    return false;
+  };
+  /** Notify and log one finished scan. / 对一次已完成的扫描进行提示并记录。 */
+  const reportScan = (
+    ctx: Pick<ExtensionContext, "ui" | "hasUI">,
+    source: { key: string; label: string },
+    input: ScanInput,
+    report: DetectionReport,
+  ) => {
+    if (report.cancelled && !report.block) return;
+    if (report.hits.length || report.errors.length)
+      appendDetection(detectionLogPath(engine.configPath), source.key, contentHash(input), report);
+    const codes = report.errors.map((error) => error.code).join(", ");
+    if (report.hits.length)
+      say(
+        ctx,
+        t(report.block ? "detectHitBlock" : "detectHitLog", { source: source.label, rules: ruleSummary(report) }),
+        report.block ? "error" : "warning",
+      );
+    else if (report.errors.length && (report.block || !repeatedErrorNotice(codes)))
+      say(
+        ctx,
+        t(report.block ? "detectErrorBlock" : detector.enforcing ? "detectErrorAllow" : "detectErrorLog", {
+          source: source.label,
+          codes,
+        }),
+        report.block ? "error" : "warning",
+      );
+    if (report.truncated)
+      say(
+        ctx,
+        t("detectTruncated", {
+          source: source.label,
+          chars: count("chars", detector.settings.maxChars * detector.settings.maxChunks),
+        }),
+        "warning",
+      );
+    showDetectStatus(ctx as Pick<ExtensionContext, "ui">);
+  };
+  /**
+   * Scan content. When no rule can block, detection never delays Pi: it runs
+   * in the background and only notifies. Otherwise the caller waits.
+   * 检测内容。若没有规则可阻断，检测绝不拖慢 Pi：在后台运行，只做提示；否则调用方等待结果。
+   */
+  const runDetection = async (
+    ctx: Pick<ExtensionContext, "ui" | "hasUI">,
+    source: { key: string; label: string },
+    input: ScanInput,
+    signal?: AbortSignal,
+  ): Promise<DetectionReport | undefined> => {
+    if (!detector.enabled || (!input.texts.length && !input.images.length)) return undefined;
+    const current = detector;
+    if (!current.enforcing) {
+      void current
+        .scan(input)
+        .then((report) => {
+          if (current === detector) reportScan(ctx, source, input, report);
+        })
+        .catch(() => undefined);
+      return undefined;
+    }
+    const report = await current.scan(input, signal);
+    reportScan(ctx, source, input, report);
+    return report;
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     try {
       // Probe this build before anything else; a listed capability blocks.
@@ -265,6 +394,15 @@ export default function informationProtecter(pi: ExtensionAPI): void {
           }),
           "warning",
         );
+      // Overrides from /protecter detect last for one session only.
+      // /protecter detect 的覆盖仅对单个会话生效。
+      detector = new Detector(detectionSettings(engine.detectionConfig));
+      if (detector.enabled && !isLoopbackEndpoint(detector.settings.endpoint))
+        say(ctx, t("detectRemote", { endpoint: endpointLabel(detector.settings.endpoint) }), "warning");
+      // Like an empty sensitiveWords list: configured, but nothing to check.
+      // 与空的 sensitiveWords 一样：已配置，但没有可检测的内容。
+      if (detector.enabled && !detector.settings.rules.length) say(ctx, t("detectNoRules"), "warning");
+      showDetectStatus(ctx);
       const rules = engine.ruleCount;
       ctx.ui.setStatus(
         "protecter",
@@ -289,6 +427,26 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       );
     }
   });
+
+  /**
+   * Last line for content that reached the request without passing the input
+   * or tool-result checks (context files, injected messages, resumed history).
+   * Units already checked are served from the cache, so only new text costs a call.
+   * 未经输入或工具结果检测、直接进入请求的内容（上下文文件、注入消息、恢复的历史）的最后一道检查。
+   * 已检测过的单元直接命中缓存，只有新文本才会调用模型。
+   */
+  const detectRequest = async (payload: unknown, ctx: ExtensionContext) => {
+    if (!detector.enabled || !detector.settings.targets.request) return;
+    const report = await runDetection(
+      ctx,
+      { key: "request", label: t("detectSourceRequest") },
+      excludeNotices(payloadUnits(payload)),
+      ctx.signal,
+    );
+    if (!report?.block) return;
+    const first = report.errors[0];
+    throw report.hits.length || !first ? failure("DETECT_HIT") : failure(first.code, first);
+  };
 
   pi.on("before_provider_request", async (event, ctx) => {
     // Count the run before anything can fail: the runtime guard only needs to
@@ -383,6 +541,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
           }
           outgoingPayload = replaceImageAttachments(event.payload, editedImages);
         }
+        // Detect what is actually sent, including edited images, before redaction.
+        // 在脱敏前检测实际发送的内容（包括编辑后的图片）。
+        await detectRequest(outgoingPayload, ctx);
         ctx.ui.notify(t("attachmentAllowed"), "warning");
         // Pass configured text through the ordinary redaction path before
         // allowing opaque attachment bytes to accompany it.
@@ -397,6 +558,7 @@ export default function informationProtecter(pi: ExtensionAPI): void {
         healthy = true;
         return redacted;
       }
+      await detectRequest(event.payload, ctx);
       const payload = await engine.redact(
         event.payload,
         ctx.model?.provider ?? "unknown",
@@ -458,15 +620,34 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     context.messageType === "user" ? text : engine.restoreText(text),
   );
 
-  pi.on("tool_result", (event, ctx) => {
-    // Observe only; never alter the result. / 仅观察，不修改结果。
-    try {
-      const images = event.content.filter((block) => block.type === "image");
-      if (!images.length) return;
-      const input = (event.input ?? {}) as Record<string, unknown>;
-      // MCP gateway calls name the real tool in `tool`. / MCP 网关调用在 `tool` 中给出实际工具名。
-      const inner = typeof input.tool === "string" ? input.tool : undefined;
-      const tool = inner ? `${event.toolName} → ${inner}` : event.toolName;
+  pi.on("input", async (event, ctx) => {
+    if (!detector.enabled || !detector.settings.targets.input) return;
+    const input: ScanInput = {
+      texts: [event.text],
+      images: event.images ? contentUnits(event.images).images : [],
+    };
+    const report = await runDetection(ctx, { key: "input", label: t("detectSourceInput") }, input, ctx.signal);
+    if (!report?.block) return;
+    // Handled input never reaches the session, so it cannot poison later requests.
+    // 被处理的输入不会进入会话，因此不会污染后续请求。
+    if (event.source === "interactive")
+      try {
+        ctx.ui.setEditorText(event.text);
+      } catch {
+        /* Best-effort restore. / 尽力恢复。 */
+      }
+    say(ctx, t("detectInputBlocked"), "warning");
+    return { action: "handled" as const };
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
+    // Image-source lookup only observes. / 图片来源反查仅做观察。
+    const input = (event.input ?? {}) as Record<string, unknown>;
+    // MCP gateway calls name the real tool in `tool`. / MCP 网关调用在 `tool` 中给出实际工具名。
+    const inner = typeof input.tool === "string" ? input.tool : undefined;
+    const tool = inner ? `${event.toolName} → ${inner}` : event.toolName;
+    const images = event.content.filter((block) => block.type === "image");
+    if (images.length) try {
       // Only an image-file argument is the image's source; a `.pen` or
       // directory path would point the user at the wrong file.
       // 只有指向图片文件的参数才是图片来源；`.pen` 或目录路径会指错文件。
@@ -478,6 +659,22 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     } catch {
       /* Path lookup is best-effort. / 路径反查仅尽力而为。 */
     }
+    // Detection is the one reason to change a result: withheld output never
+    // enters the conversation, so it never reaches any model.
+    // 检测是唯一会修改结果的情况：被拦截的输出不会进入会话，也就不会到达任何模型。
+    if (!detector.enabled || !detector.settings.targets.toolResults) return;
+    const report = await runDetection(
+      ctx,
+      { key: `tool:${tool}`, label: t("detectSourceTool", { tool }) },
+      contentUnits(event.content),
+      ctx.signal,
+    );
+    if (!report?.block) return;
+    const text = report.hits.length
+      ? t("detectToolWithheld", { rules: [...new Set(report.hits.map((hit) => hit.rule))].join(", ") })
+      : t("detectToolWithheldError");
+    withheldNotices.add(text);
+    return { content: [{ type: "text" as const, text }], isError: true };
   });
 
   pi.on("tool_call", (event, ctx) => {
@@ -596,12 +793,152 @@ export default function informationProtecter(pi: ExtensionAPI): void {
     }
   });
 
+  const endpointLabel = (endpoint: string) => {
+    try {
+      const url = new URL(endpoint);
+      return `${url.origin}${url.pathname}`;
+    } catch {
+      return "?";
+    }
+  };
+  const IMAGE_MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+  /** `/protecter detect …`: status, session overrides, logs and a local test. / 状态、会话覆盖、日志与本地测试。 */
+  const detectCommand = async (raw: string, ctx: ExtensionContext) => {
+    const sub = raw.split(/\s+/).filter(Boolean)[0] ?? "status";
+    if (["on", "off", "log", "block"].includes(sub)) {
+      // Session overrides only adjust what the configuration defines; the
+      // service and rules always come from the local configuration file.
+      // 会话覆盖只调整配置中已定义的内容；服务与规则始终来自本地配置文件。
+      if (sub !== "off" && !detector.settings.configured) {
+        ctx.ui.notify(t("detectNotConfigured"), "warning");
+        return;
+      }
+      detector.resetBreaker();
+      lastErrorNotice = { codes: "", at: 0 };
+    }
+    if (sub === "on" || sub === "off") {
+      detector.override.enabled = sub === "on";
+      ctx.ui.notify(t("detectSessionChanged", { mode: detectMode() }), "info");
+      if (sub === "on" && !isLoopbackEndpoint(detector.settings.endpoint))
+        ctx.ui.notify(t("detectRemote", { endpoint: endpointLabel(detector.settings.endpoint) }), "warning");
+      showDetectStatus(ctx);
+      return;
+    }
+    if (sub === "log" || sub === "block") {
+      detector.override.enabled = true;
+      detector.override.action = sub;
+      ctx.ui.notify(t("detectSessionChanged", { mode: detectMode() }), "info");
+      showDetectStatus(ctx);
+      return;
+    }
+    if (sub === "status") {
+      const settings = detector.settings;
+      const info = await probeService({
+        endpoint: settings.endpoint,
+        apiKey: detector.apiKey,
+        timeoutMs: settings.timeoutMs,
+      });
+      if (info.healthy) detector.resetBreaker();
+      const service = info.healthy
+        ? t("detectServiceUp", {
+            model: info.model ?? "?",
+            vision: info.vision === undefined ? "?" : String(info.vision),
+            context: info.contextTokens ?? "?",
+            slots: info.slots ?? "?",
+          })
+        : t("detectServiceDown");
+      ctx.ui.notify(
+        t("detectStatus", {
+          state: detectMode(),
+          endpoint: endpointLabel(settings.endpoint),
+          service,
+          rules: settings.rules.map((rule) => `${rule.id}≥${rule.threshold}→${detector.actionOf(rule)}`).join(", "),
+          concurrency: settings.concurrency,
+          onError: settings.onError,
+          ...detector.stats,
+        }),
+        info.healthy ? "info" : "warning",
+      );
+      showDetectStatus(ctx);
+      return;
+    }
+    if (sub === "logs") {
+      // Records carry no content, so any mode may show them. / 记录不含原文，任何模式均可展示。
+      const records = readDetections(detectionLogPath(engine.configPath), 50);
+      if (!records.length) {
+        ctx.ui.notify(t("detectLogsNone"), "info");
+        return;
+      }
+      const lines = records.map((record) => {
+        const hits = record.hits.map((hit) => `${hit.rule} ${Math.round(hit.probability * 100)}% ${hit.action}`).join(", ");
+        const errors = record.errors.length ? ` [${record.errors.join(", ")}]` : "";
+        return `${record.time} ${record.block ? "BLOCK" : "LOG  "} ${record.source}: ${hits}${errors}`;
+      });
+      const text = `${t("detectLogsTitle")}\n\n${lines.join("\n")}`;
+      if (ctx.mode === "tui") await ctx.ui.editor(t("logsPreviewTitle"), text);
+      else ctx.ui.notify(text, "info");
+      return;
+    }
+    if (sub === "test") {
+      const argument = raw.slice(sub.length).trim();
+      if (!argument) {
+        ctx.ui.notify(t("detectUsage"), "info");
+        return;
+      }
+      try {
+        let units: DetectUnit[];
+        const path = /^@/.test(argument) ? resolve(argument.slice(1).trim().replace(/^(['"])(.*)\1$/, "$2")) : undefined;
+        const mime = path ? IMAGE_MIME[path.split(".").pop()?.toLowerCase() ?? ""] : undefined;
+        if (path && mime) {
+          const stats = await lstat(path).catch((error) => {
+            throw sanitizeError(error, "TEST_INPUT");
+          });
+          if (!stats.isFile()) throw failure("TEST_INPUT");
+          if (stats.size > detector.settings.maxImageBytes)
+            throw failure("DETECT_IMAGE", { bytes: stats.size, limit: detector.settings.maxImageBytes });
+          units = [{ kind: "image", mimeType: mime, data: (await readFile(path)).toString("base64") }];
+        } else {
+          const { text } = await readTestInput(argument);
+          const step = detector.settings.maxChars;
+          units = [];
+          for (let i = 0; i < text.length && units.length < detector.settings.maxChunks; i += step)
+            units.push({ kind: "text", text: text.slice(i, i + step) });
+        }
+        const started = Date.now();
+        const results = await detector.inspect(units);
+        const lines = results.map(({ rule, action, probability, error }) =>
+          error
+            ? `✗ ${rule.id}: ${error.code}`
+            : t("detectTestRule", {
+                mark: probability !== undefined && probability >= rule.threshold ? "●" : "○",
+                rule: rule.id,
+                probability: probability === undefined ? "-" : probability.toFixed(3),
+                threshold: rule.threshold,
+                action,
+              }),
+        );
+        ctx.ui.notify(
+          [t("detectTestResult", { kind: units[0]?.kind ?? "text", elapsed: Date.now() - started }), ...lines].join("\n"),
+          results.some((r) => r.error) ? "warning" : "info",
+        );
+      } catch (error) {
+        ctx.ui.notify(record(sanitizeError(error, "TEST_INPUT").diagnostic), "error");
+      }
+      return;
+    }
+    ctx.ui.notify(t("detectUsage"), "info");
+  };
+
   pi.registerCommand("protecter", {
     description: t("commandDescription"),
     handler: async (args, ctx) => {
       const raw = args.trim();
       const parts = raw.split(/\s+/).filter(Boolean);
       const action = parts[0] ?? "logs";
+      if (action === "detect") {
+        await detectCommand(raw.slice(action.length).trim(), ctx);
+        return;
+      }
       if (action === "test") {
         // Offline check: redact local text or a local file and show the result.
         // Nothing is sent to a model, so the output is safe to display anywhere.
@@ -739,6 +1076,9 @@ export default function informationProtecter(pi: ExtensionAPI): void {
       const compactLine = `\n${t("statusCompaction", {
         mode: engine.compactionMode,
         guard: t(releaseGuard ? "guardInstalled" : "guardMissing"),
+      })}\n${t("statusDetection", {
+        mode: detectMode(),
+        rules: detector.settings.rules.length,
       })}`;
       const detail = last
         ? `\n${t("statusLastBlock", { at: lastBlock?.at ?? "" })}\n${last}`
