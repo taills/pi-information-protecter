@@ -1,5 +1,18 @@
 # Changelog / 更新日志
 
+## 0.16.0 — System One content detection / System One 内容检测
+
+### Added / 新增
+
+- Optional `detection` setting: a local System One decision model (llama.cpp `/v1/systemone`) checks your messages, tool output and model requests, text and images, for content that looks sensitive. Each rule either records a hit (`log`) or blocks it (`block`); hits always show in the terminal. A blocked message is not sent and goes back into the editor, blocked tool output is replaced by a notice that names only the rule IDs, and a blocked model request fails closed with `DETECT_HIT`.
+  新增可选的 `detection` 配置：由本机 System One 决策模型（llama.cpp `/v1/systemone`）检测你的消息、工具输出和模型请求中的文本与图片，判断是否疑似敏感。每条规则可设为记录命中（`log`）或阻断（`block`），命中时一定会在终端提示。被阻断的消息不会发送，并放回编辑框；被阻断的工具输出替换为只含规则 ID 的说明；被阻断的模型请求以 `DETECT_HIT` 失败即阻断。
+- Rules run in parallel: every chunk and image is checked against every rule at once, bounded by `concurrency`, and the first blocking hit ends the wait. Log-only detection runs in the background and never delays Pi. Results are cached by content hash and shared between concurrent checks.
+  规则并行执行：每个分段和图片同时用所有规则检测，受 `concurrency` 限制，第一条阻断命中即结束等待。仅记录的检测在后台运行，从不拖慢 Pi。结果按内容哈希缓存，并发检查共享在途请求。
+- The model service (`detection.model`) and the rules (`detection.rules`) live in the local machine configuration like every other setting: validated at load (`CONFIG_DETECTION` fails closed), merged during migration (rules combined, stricter action wins), nothing built in. `protecter.example.json` adds a complete example with five tested rules, disabled until the local service runs.
+  模型服务（`detection.model`）与规则（`detection.rules`）与其他设置一样保存在本地机器配置中：加载时校验（`CONFIG_DETECTION` 失败即阻断），迁移时合并（规则合并，动作取更严格者），没有任何内置项。`protecter.example.json` 新增完整示例，包含五条已验证的规则，在本地服务运行前默认关闭。
+- `/protecter detect [status|on|off|log|block|logs|test]`, a content-free detection log (`protecter.<machineHash>.detections.jsonl`), and `scripts/systemone-smoke.ts` for checking a real service.
+  新增 `/protecter detect [status|on|off|log|block|logs|test]` 命令、不含原文的检测日志（`protecter.<machineHash>.detections.jsonl`），以及用于检验真实服务的 `scripts/systemone-smoke.ts`。
+
 ## 0.15.3 — Pi 1.5.x compatibility / 兼容 Pi 1.5.x
 
 ### Changed / 变更
