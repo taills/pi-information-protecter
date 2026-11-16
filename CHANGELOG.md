@@ -1,5 +1,12 @@
 # Changelog / 更新日志
 
+## 0.16.1 — Redaction boundary safety / 脱敏边界安全修复
+
+### Fixed / 修复
+
+- Block literal sensitive matches that cross an existing replacement boundary instead of allowing them to be overlooked. Added regression tests for repeated redaction and restoration.
+  对跨越已有替换值边界的敏感字面匹配进行拦截，防止遗漏；新增重复脱敏及还原的回归测试。
+
 ## 0.16.0 — System One content detection / System One 内容检测
 
 ### Added / 新增

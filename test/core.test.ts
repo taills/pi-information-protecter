@@ -149,6 +149,16 @@ test("same value reuses random token, parallel scans agree and tokens are idempo
   assert.equal(engine.restoreText("unrelated-value"), "unrelated-value");
 });
 
+test("repeated secrets and tokens are all redacted and restored", async (t) => {
+  const { engine } = await fixture(t, ["secret", { type: "regex", pattern: "key-[0-9]+" }]);
+  const input = { secret: "secret secret key-123 key-123", nested: ["secret", "key-123"] };
+  const masked = await engine.redact(input);
+  assert.ok(!JSON.stringify(masked).includes("secret"));
+  assert.ok(!JSON.stringify(masked).includes("key-123"));
+  assert.deepEqual(JSON.parse(JSON.stringify(engine.restore(masked))), input);
+  assert.deepEqual(await engine.redact(masked), masked);
+});
+
 test("regex captures replace only full match, retain exact case, and handle overlapping rules", async (t) => {
   const { engine } = await fixture(t, [
     "abc",

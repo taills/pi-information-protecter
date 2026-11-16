@@ -38,6 +38,15 @@ test("fixed literals plus random fallback and audit / 固定字面替换、随�
   assert.equal(engine.auditRecords().records[0].replacement, "Alphabet Inc.");
 });
 
+test("literal matches crossing an existing alias are blocked", async (t) => {
+  const { engine } = await fixture(t, [
+    { type: "literal", value: "secret", replacement: "Alias" },
+    "iasSuffix",
+  ]);
+  assert.equal(await engine.redact("secret"), "Alias");
+  await assert.rejects(engine.redact("AliasSuffix"), /FIXED_ALIAS_CROSSING/);
+});
+
 test("multi-turn history keeps exact redacted prefixes / 多轮历史保持精确脱敏前缀", async (t) => {
   const { engine } = await fixture(t, [
     "random-secret",
